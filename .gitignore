@@ -1,0 +1,13 @@
+.planning/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Packaging output
+*.egg-info/
+build/
+dist/
