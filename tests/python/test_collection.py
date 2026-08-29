@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from fleet_audit.collection import CollectionError, collect_snapshot
+from fleet_audit.collection.runner import CollectorStatus, run_collector
+from fleet_audit.collection.workspace import secure_workspace
+from fleet_audit.validation import validate_snapshot
+
+PROJECT_ROOT = Path(__file__).parents[2]
+
+
+def run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(PROJECT_ROOT / "src")
+    return subprocess.run(
+        [sys.executable, "-m", "fleet_audit", *arguments],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+
+def write_collector(directory: Path, body: str) -> Path:
+    collector = directory / "collector.sh"
+    collector.write_text("#!/usr/bin/env bash\nset -u\n" + body, encoding="utf-8")
+    return collector
+
+
+def test_workspace_is_private_and_removed_after_success(tmp_path: Path) -> None:
+    with secure_workspace(parent=tmp_path) as workspace:
+        workspace_path = workspace
+        mode = stat.S_IMODE(workspace.stat().st_mode)
+
+        assert mode == 0o700
+        assert workspace.parent == tmp_path
+
+    assert not workspace_path.exists()
+
+
+def test_workspace_is_removed_after_exception(tmp_path: Path) -> None:
+    workspace_path: Path | None = None
+
+    with pytest.raises(RuntimeError, match="parser failed"):
+        with secure_workspace(parent=tmp_path) as workspace:
+            workspace_path = workspace
+            raise RuntimeError("parser failed")
+
+    assert workspace_path is not None
+    assert not workspace_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "expected_status"),
+    [
+        (0, CollectorStatus.AVAILABLE),
+        (10, CollectorStatus.UNAVAILABLE),
+        (7, CollectorStatus.ERROR),
+    ],
+)
+def test_collector_exit_codes_have_distinct_states(
+    tmp_path: Path,
+    exit_code: int,
+    expected_status: CollectorStatus,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    collector = write_collector(tmp_path, f"exit {exit_code}\n")
+
+    result = run_collector("stub", collector, workspace, timeout_seconds=1)
+
+    assert result.name == "stub"
+    assert result.status is expected_status
+    assert result.exit_code == exit_code
+
+
+def test_collector_timeout_is_an_error(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    collector = write_collector(tmp_path, "sleep 1\n")
+
+    result = run_collector("stub", collector, workspace, timeout_seconds=0.01)
+
+    assert result.status is CollectorStatus.ERROR
+    assert result.exit_code is None
+    assert result.detail == "Collector exceeded its 0.01 second timeout."
+
+
+def test_collector_timeout_terminates_background_children(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    marker = tmp_path / "late-write"
+    collector = write_collector(
+        tmp_path,
+        f"(sleep 0.1; printf late > {shlex.quote(str(marker))}) &\nwait\n",
+    )
+
+    result = run_collector("stub", collector, workspace, timeout_seconds=0.01)
+    time.sleep(0.2)
+
+    assert result.status is CollectorStatus.ERROR
+    assert not marker.exists()
+
+
+def test_timeout_snapshot_preserves_error_and_removes_workspace(tmp_path: Path) -> None:
+    collector = write_collector(tmp_path, "sleep 1\n")
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_path=collector,
+        timeout_seconds=0.01,
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["collection"]["capabilities"] == [
+        {
+            "name": "stub",
+            "status": "error",
+            "detail": "Collector exceeded its 0.01 second timeout.",
+        }
+    ]
+    assert list(tmp_path.glob("fleet-audit-*")) == []
+
+
+def test_parser_failure_removes_collection_workspace(tmp_path: Path) -> None:
+    collector = write_collector(
+        tmp_path,
+        'printf "unexpected\\n" > "${1}/stub.status"\n',
+    )
+
+    with pytest.raises(CollectionError, match="unexpected stub output"):
+        collect_snapshot(
+            label="test-host",
+            collector_path=collector,
+            workspace_parent=tmp_path,
+        )
+
+    assert list(tmp_path.glob("fleet-audit-*")) == []
+
+
+def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> None:
+    output = tmp_path / "snapshot.json"
+
+    result = run_cli("collect", "--label", "demo-host", "--output", str(output))
+
+    assert result.returncode == 0
+    assert result.stdout == f"Snapshot written to {output}\n"
+    assert result.stderr == ""
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+    snapshot = json.loads(output.read_text(encoding="utf-8"))
+    validate_snapshot(snapshot)
+    assert snapshot["host"] == {"label": "demo-host"}
+    assert snapshot["collection"]["capabilities"] == [{"name": "stub", "status": "available"}]
+
+
+def test_collect_command_does_not_overwrite_existing_file(tmp_path: Path) -> None:
+    output = tmp_path / "snapshot.json"
+    output.write_text("keep me", encoding="utf-8")
+
+    result = run_cli("collect", "--output", str(output))
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "already exists" in result.stderr
+    assert output.read_text(encoding="utf-8") == "keep me"
+
+
+def test_collect_command_does_not_follow_output_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    target.write_text("keep target", encoding="utf-8")
+    output = tmp_path / "snapshot.json"
+    output.symlink_to(target)
+
+    result = run_cli("collect", "--output", str(output))
+
+    assert result.returncode == 2
+    assert "already exists" in result.stderr
+    assert target.read_text(encoding="utf-8") == "keep target"
+
+
+def test_validate_command_accepts_valid_snapshot() -> None:
+    fixture = PROJECT_ROOT / "tests" / "fixtures" / "snapshots" / "complete.json"
+
+    result = run_cli("validate", str(fixture))
+
+    assert result.returncode == 0
+    assert result.stdout == f"Snapshot is valid: {fixture}\n"
+    assert result.stderr == ""
+
+
+def test_validate_command_rejects_invalid_snapshot() -> None:
+    fixture = PROJECT_ROOT / "tests" / "fixtures" / "snapshots" / "invalid.json"
+
+    result = run_cli("validate", str(fixture))
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "hostname" in result.stderr

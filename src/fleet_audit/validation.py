@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterable
 from functools import lru_cache
 from importlib.resources import files
+from pathlib import Path
 from typing import Any, cast
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -32,6 +33,20 @@ def validate_snapshot(snapshot: object) -> None:
 
     messages = [_format_error(error.absolute_path, error.message) for error in errors]
     raise SnapshotValidationError("; ".join(messages))
+
+
+def load_snapshot(path: Path) -> dict[str, Any]:
+    try:
+        with path.open(encoding="utf-8") as snapshot_file:
+            snapshot = json.load(snapshot_file)
+    except json.JSONDecodeError as error:
+        message = f"invalid JSON at line {error.lineno}: {error.msg}"
+        raise SnapshotValidationError(message) from error
+    except OSError as error:
+        raise SnapshotValidationError(f"could not read snapshot: {error.strerror}") from error
+
+    validate_snapshot(snapshot)
+    return cast(dict[str, Any], snapshot)
 
 
 def _error_sort_key(error: ValidationError) -> tuple[str, str]:

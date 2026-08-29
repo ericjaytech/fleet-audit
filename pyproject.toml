@@ -38,6 +38,7 @@ fleet-audit = "fleet_audit.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"fleet_audit.collectors" = ["*.sh"]
 "fleet_audit.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
