@@ -37,6 +37,9 @@ fleet-audit = "fleet_audit.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"fleet_audit.schemas" = ["*.json"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests/python"]

@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ericjay.net/schemas/fleet-audit/snapshot-v1.schema.json",
+  "title": "Fleet Audit snapshot version 1",
+  "description": "Privacy-safe Linux inventory and configuration-check results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "collected_at",
+    "host",
+    "platform",
+    "hardware",
+    "storage",
+    "network",
+    "software",
+    "checks",
+    "collection"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "const": "fleet-audit"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+        }
+      }
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[^\\r\\n]+$"
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/domainStatus"
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version_id", "pretty_name"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "version_id": {"type": "string", "minLength": 1},
+            "pretty_name": {"type": "string", "minLength": 1}
+          }
+        },
+        "kernel": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "uptime_seconds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/domainStatus"
+        },
+        "cpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["logical_processors"],
+          "properties": {
+            "model": {"type": "string", "minLength": 1},
+            "logical_processors": {"type": "integer", "minimum": 1}
+          }
+        },
+        "memory_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "devices", "filesystems"],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/domainStatus"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "size_bytes"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "type": {"type": "string", "minLength": 1},
+              "size_bytes": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "filesystems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mountpoint", "filesystem_type", "size_bytes", "used_bytes", "used_percent"],
+            "properties": {
+              "mountpoint": {"type": "string", "minLength": 1},
+              "filesystem_type": {"type": "string", "minLength": 1},
+              "size_bytes": {"type": "integer", "minimum": 0},
+              "used_bytes": {"type": "integer", "minimum": 0},
+              "used_percent": {"type": "number", "minimum": 0, "maximum": 100}
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "interfaces", "listening_sockets"],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/domainStatus"
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "state": {
+                "enum": ["up", "down", "unknown"]
+              }
+            }
+          }
+        },
+        "listening_sockets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["protocol", "port", "bind_scope"],
+            "properties": {
+              "protocol": {
+                "enum": ["tcp", "udp"]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "bind_scope": {
+                "enum": ["loopback", "external", "wildcard", "unknown"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "software": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "package_manager",
+        "installed_packages",
+        "enabled_services",
+        "pending_updates",
+        "reboot_required"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/domainStatus"
+        },
+        "package_manager": {
+          "type": ["string", "null"]
+        },
+        "installed_packages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "architecture"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1},
+              "architecture": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "enabled_services": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "pending_updates": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "reboot_required": {
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "summary"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*$"
+          },
+          "status": {
+            "enum": ["PASS", "WARN", "FAIL", "SKIP", "ERROR"]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "privilege_level", "duration_ms", "capabilities", "warnings"],
+      "properties": {
+        "status": {
+          "enum": ["complete", "partial", "failed"]
+        },
+        "privilege_level": {
+          "enum": ["non-root", "root"]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "status"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]*$"
+              },
+              "status": {
+                "enum": ["available", "unavailable", "error"]
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["collector", "code", "message"],
+            "properties": {
+              "collector": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]*$"
+              },
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "domainStatus": {
+      "enum": ["complete", "partial", "unavailable"]
+    }
+  }
+}
