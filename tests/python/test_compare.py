@@ -230,3 +230,20 @@ def test_changed_fixture_exercises_each_initial_comparison_category() -> None:
         "checks": 2,
         "capabilities": 1,
     }
+
+
+def test_duplicate_identity_error_does_not_echo_snapshot_control_characters() -> None:
+    baseline = complete_snapshot()
+    current = copy.deepcopy(baseline)
+    unsafe_name = "\x1b[31mduplicate"
+    current["software"]["installed_packages"].extend(
+        [
+            {"name": unsafe_name, "version": "1", "architecture": "amd64"},
+            {"name": unsafe_name, "version": "1", "architecture": "amd64"},
+        ]
+    )
+
+    with pytest.raises(ComparisonError, match="duplicate package identity") as error:
+        compare_snapshots(baseline, current)
+
+    assert unsafe_name not in str(error.value)

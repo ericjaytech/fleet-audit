@@ -197,3 +197,19 @@ def test_compare_host_mismatch_requires_cli_acknowledgement(tmp_path: Path) -> N
     assert "host labels differ" in rejected.stderr
     assert accepted.returncode == 0
     assert "Snapshot comparison: unchanged" in accepted.stdout
+
+
+def test_compare_text_escapes_snapshot_control_characters(tmp_path: Path) -> None:
+    fixture = FIXTURES / "snapshots" / "complete.json"
+    current: dict[str, Any] = json.loads(fixture.read_text(encoding="utf-8"))
+    current["software"]["installed_packages"].append(
+        {"name": "\x1b[31munsafe", "version": "1", "architecture": "amd64"}
+    )
+    current_path = tmp_path / "current.json"
+    current_path.write_text(json.dumps(current), encoding="utf-8")
+
+    result = run_cli("compare", str(fixture), str(current_path))
+
+    assert result.returncode == 0
+    assert "\x1b" not in result.stdout
+    assert "\\u001b[31munsafe:amd64" in result.stdout

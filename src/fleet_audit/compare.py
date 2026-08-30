@@ -151,7 +151,7 @@ def _packages(snapshot: dict[str, Any]) -> dict[str, ChangeValue]:
     for package in snapshot["software"]["installed_packages"]:
         key = f"{package['name']}:{package['architecture']}"
         if key in packages:
-            raise ComparisonError(f"duplicate package identity: {key}")
+            raise ComparisonError("duplicate package identity")
         packages[key] = package["version"]
     return packages
 
@@ -181,7 +181,7 @@ def _checks(snapshot: dict[str, Any]) -> dict[str, ChangeValue]:
     for check in snapshot["checks"]:
         key = check["id"]
         if key in checks:
-            raise ComparisonError(f"duplicate policy check identity: {key}")
+            raise ComparisonError("duplicate policy check identity")
         checks[key] = check["status"]
     return checks
 
@@ -191,7 +191,7 @@ def _capabilities(snapshot: dict[str, Any]) -> dict[str, ChangeValue]:
     for capability in snapshot["collection"]["capabilities"]:
         key = capability["name"]
         if key in capabilities:
-            raise ComparisonError(f"duplicate capability identity: {key}")
+            raise ComparisonError("duplicate capability identity")
         capabilities[key] = capability["status"]
     return capabilities
 
