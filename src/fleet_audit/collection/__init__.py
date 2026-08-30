@@ -249,10 +249,19 @@ def _snapshot(
         "software": domains["software"],
         "checks": [],
         "collection": {
-            "status": "partial",
+            "status": _collection_status(domains),
             "privilege_level": "root" if os.geteuid() == 0 else "non-root",
             "duration_ms": max(0, int((monotonic() - started_at) * 1000)),
             "capabilities": capabilities,
             "warnings": warnings,
         },
     }
+
+
+def _collection_status(domains: dict[str, dict[str, Any]]) -> str:
+    statuses = {domain["status"] for domain in domains.values()}
+    if statuses == {"complete"}:
+        return "complete"
+    if statuses == {"unavailable"}:
+        return "failed"
+    return "partial"
