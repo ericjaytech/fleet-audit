@@ -58,15 +58,16 @@ The collection paths target Ubuntu 22.04 and 24.04, with Debian 12 as a secondar
 Install the tagged release with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/ericjaytech/fleet-audit.git@v0.1.1"
+git clone --branch v0.1.1 --depth 1 \
+  https://github.com/ericjaytech/fleet-audit.git
+cd fleet-audit
+pipx install .
 fleet-audit --version
 ```
 
-For development, clone the repository and install it into a virtual environment:
+For development, install the checkout into a virtual environment:
 
 ```bash
-git clone https://github.com/ericjaytech/fleet-audit.git
-cd fleet-audit
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install .
