@@ -1,3 +1,5 @@
+"""Normalise independent block-device and filesystem JSON outputs from the storage collector."""
+
 from __future__ import annotations
 
 import json
@@ -7,13 +9,15 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from fleet_audit.collection._parsing import ParsingError, is_regular_file, read_required_file, text
+
 _MAX_INPUT_BYTES = 4_194_304
 _MAX_ITEMS = 10_000
 _NONNEGATIVE_INTEGER = re.compile(r"^[0-9]+$")
 _PERCENTAGE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)%$")
 
 
-class StorageParseError(ValueError):
+class StorageParseError(ParsingError):
     """Raised when no usable storage collector output remains."""
 
 
@@ -35,7 +39,7 @@ def parse_storage(workspace: Path) -> StorageParseResult:
     devices: list[dict[str, Any]] | None = None
     filesystems: list[dict[str, Any]] | None = None
 
-    if _is_regular_file(workspace / "lsblk.error"):
+    if is_regular_file(workspace / "lsblk.error"):
         warnings.append(
             StorageWarning(
                 code="BLOCK_DEVICES_UNAVAILABLE",
@@ -53,7 +57,7 @@ def parse_storage(workspace: Path) -> StorageParseResult:
                 )
             )
 
-    if _is_regular_file(workspace / "findmnt.error"):
+    if is_regular_file(workspace / "findmnt.error"):
         warnings.append(
             StorageWarning(
                 code="FILESYSTEMS_UNAVAILABLE",
@@ -100,25 +104,14 @@ def parse_storage(workspace: Path) -> StorageParseResult:
     )
 
 
-def _is_regular_file(path: Path) -> bool:
-    return not path.is_symlink() and path.is_file()
-
-
 def _load_json(path: Path) -> object:
-    try:
-        if not _is_regular_file(path):
-            raise StorageParseError(f"required storage input is missing: {path.name}")
-        with path.open("rb") as input_file:
-            raw = input_file.read(_MAX_INPUT_BYTES + 1)
-    except OSError as error:
-        raise StorageParseError(f"could not read storage input {path.name}") from error
-
-    if len(raw) > _MAX_INPUT_BYTES:
-        raise StorageParseError(f"storage input is too large: {path.name}")
+    raw = read_required_file(
+        path, max_bytes=_MAX_INPUT_BYTES, error_cls=StorageParseError, label=path.name
+    )
     try:
         document = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise StorageParseError(f"storage input is not valid JSON: {path.name}") from error
+    except json.JSONDecodeError as exc:
+        raise StorageParseError(f"storage input is not valid JSON: {path.name}") from exc
     return document
 
 
@@ -130,8 +123,12 @@ def _parse_devices(document: object) -> list[dict[str, Any]]:
             raise StorageParseError("invalid block-device entry")
         devices.append(
             {
-                "name": _text(item.get("name"), "device name", maximum_length=255),
-                "type": _text(item.get("type"), "device type", maximum_length=100),
+                "name": text(
+                    item.get("name"), "device name", maximum_length=255, error_cls=StorageParseError
+                ),
+                "type": text(
+                    item.get("type"), "device type", maximum_length=100, error_cls=StorageParseError
+                ),
                 "size_bytes": _nonnegative_integer(item.get("size"), "device size"),
             }
         )
@@ -159,11 +156,17 @@ def _parse_filesystems(document: object) -> tuple[list[dict[str, Any]], bool]:
             raise StorageParseError("filesystem used size exceeds total size")
         filesystems.append(
             {
-                "mountpoint": _text(item.get("target"), "mountpoint", maximum_length=4_096),
-                "filesystem_type": _text(
+                "mountpoint": text(
+                    item.get("target"),
+                    "mountpoint",
+                    maximum_length=4_096,
+                    error_cls=StorageParseError,
+                ),
+                "filesystem_type": text(
                     item.get("fstype"),
                     "filesystem type",
                     maximum_length=100,
+                    error_cls=StorageParseError,
                 ),
                 "size_bytes": size_bytes,
                 "used_bytes": used_bytes,
@@ -188,17 +191,6 @@ def _document_items(document: object, key: str) -> list[object]:
     return items
 
 
-def _text(value: object, field: str, *, maximum_length: int) -> str:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value) > maximum_length
-        or not value.isprintable()
-    ):
-        raise StorageParseError(f"invalid {field}")
-    return value
-
-
 def _nonnegative_integer(value: object, field: str) -> int:
     if isinstance(value, bool):
         raise StorageParseError(f"invalid {field}")
@@ -219,8 +211,8 @@ def _percentage(value: object) -> int | float | None:
         raise StorageParseError("invalid filesystem utilisation percentage")
     try:
         percentage = Decimal(match.group(1))
-    except InvalidOperation as error:
-        raise StorageParseError("invalid filesystem utilisation percentage") from error
+    except InvalidOperation as exc:
+        raise StorageParseError("invalid filesystem utilisation percentage") from exc
     if percentage > 100:
         raise StorageParseError("filesystem utilisation percentage exceeds 100")
     if percentage == percentage.to_integral_value():

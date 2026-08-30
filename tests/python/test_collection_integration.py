@@ -117,7 +117,7 @@ def test_final_validation_failure_prevents_snapshot_publication(
     def reject_snapshot(snapshot: object) -> None:
         raise SnapshotValidationError("synthetic validation failure")
 
-    monkeypatch.setattr("fleet_audit.collection.validate_snapshot", reject_snapshot)
+    monkeypatch.setattr("fleet_audit.collection._orchestrator.validate_snapshot", reject_snapshot)
 
     with pytest.raises(CollectionError, match="generated snapshot failed validation"):
         collect_snapshot(

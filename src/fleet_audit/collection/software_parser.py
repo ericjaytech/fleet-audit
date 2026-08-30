@@ -1,3 +1,5 @@
+"""Normalise independent package, service, update and reboot facts from the software collector."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -5,12 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
+from fleet_audit.collection._parsing import ParsingError, is_regular_file, read_lines, text
+
 _MAX_INPUT_BYTES = 4_194_304
 _MAX_LINES = 100_000
 _MAX_INTEGER_DIGITS = 20
 
 
-class SoftwareParseError(ValueError):
+class SoftwareParseError(ParsingError):
     """Raised when no usable software collector output remains."""
 
 
@@ -133,38 +137,21 @@ def _parse_source(
     invalid_warning: SoftwareWarning,
     warnings: list[SoftwareWarning],
 ) -> _ParsedValue | None:
-    if _is_regular_file(workspace / error_filename):
+    if is_regular_file(workspace / error_filename):
         warnings.append(unavailable_warning)
         return None
     try:
-        return parser(_read_lines(workspace / data_filename))
+        return parser(
+            read_lines(
+                workspace / data_filename,
+                max_bytes=_MAX_INPUT_BYTES,
+                max_lines=_MAX_LINES,
+                error_cls=SoftwareParseError,
+            )
+        )
     except SoftwareParseError:
         warnings.append(invalid_warning)
         return None
-
-
-def _is_regular_file(path: Path) -> bool:
-    return not path.is_symlink() and path.is_file()
-
-
-def _read_lines(path: Path) -> list[str]:
-    try:
-        if not _is_regular_file(path):
-            raise SoftwareParseError(f"required software input is missing: {path.name}")
-        with path.open("rb") as input_file:
-            raw = input_file.read(_MAX_INPUT_BYTES + 1)
-    except OSError as error:
-        raise SoftwareParseError(f"could not read software input {path.name}") from error
-
-    if len(raw) > _MAX_INPUT_BYTES:
-        raise SoftwareParseError(f"software input is too large: {path.name}")
-    try:
-        lines = raw.decode("utf-8").splitlines()
-    except UnicodeDecodeError as error:
-        raise SoftwareParseError(f"software input is not UTF-8: {path.name}") from error
-    if len(lines) > _MAX_LINES:
-        raise SoftwareParseError(f"software input has too many lines: {path.name}")
-    return lines
 
 
 def _parse_packages(lines: list[str]) -> list[dict[str, str]]:
@@ -173,9 +160,13 @@ def _parse_packages(lines: list[str]) -> list[dict[str, str]]:
         fields = line.split("\t")
         if len(fields) != 3:
             raise SoftwareParseError("invalid installed-package entry")
-        name = _text(fields[0], "package name", maximum_length=255)
-        version = _text(fields[1], "package version", maximum_length=1_024)
-        architecture = _text(fields[2], "package architecture", maximum_length=100)
+        name = text(fields[0], "package name", maximum_length=255, error_cls=SoftwareParseError)
+        version = text(
+            fields[1], "package version", maximum_length=1_024, error_cls=SoftwareParseError
+        )
+        architecture = text(
+            fields[2], "package architecture", maximum_length=100, error_cls=SoftwareParseError
+        )
         key = (name, architecture)
         previous_version = packages.get(key)
         if previous_version is not None and previous_version != version:
@@ -192,7 +183,7 @@ def _parse_packages(lines: list[str]) -> list[dict[str, str]]:
 def _parse_services(lines: list[str]) -> list[str]:
     services: set[str] = set()
     for line in lines:
-        service = _text(line, "service name", maximum_length=255)
+        service = text(line, "service name", maximum_length=255, error_cls=SoftwareParseError)
         if not service.endswith(".service"):
             raise SoftwareParseError("invalid service name")
         services.add(service)
@@ -216,9 +207,3 @@ def _parse_reboot_required(lines: list[str]) -> bool:
     if lines == ["false"]:
         return False
     raise SoftwareParseError("invalid reboot-required state")
-
-
-def _text(value: str, field: str, *, maximum_length: int) -> str:
-    if not value or len(value) > maximum_length or not value.isprintable():
-        raise SoftwareParseError(f"invalid {field}")
-    return value

@@ -1,8 +1,12 @@
+"""Normalise raw hardware collector files into the snapshot schema."""
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import Any
+
+from fleet_audit.collection._parsing import ParsingError, read_required_file
 
 _CPUINFO_MAX_BYTES = 1_048_576
 _MEMINFO_MAX_BYTES = 262_144
@@ -12,17 +16,22 @@ _POSITIVE_INTEGER = re.compile(r"^[1-9][0-9]*$")
 _MEMTOTAL = re.compile(r"^\s*([0-9]+)\s+kB\s*$")
 
 
-class HardwareParseError(ValueError):
+class HardwareParseError(ParsingError):
     """Raised when raw hardware output is missing or malformed."""
 
 
 def parse_hardware(workspace: Path) -> dict[str, Any]:
     """Normalise raw hardware collector files into the snapshot schema."""
-    cpuinfo = _read_required(workspace / "cpuinfo", _CPUINFO_MAX_BYTES)
-    meminfo = _read_required(workspace / "meminfo", _MEMINFO_MAX_BYTES)
-    logical_raw = _read_required(
+    cpuinfo = read_required_file(
+        workspace / "cpuinfo", max_bytes=_CPUINFO_MAX_BYTES, error_cls=HardwareParseError
+    )
+    meminfo = read_required_file(
+        workspace / "meminfo", max_bytes=_MEMINFO_MAX_BYTES, error_cls=HardwareParseError
+    )
+    logical_raw = read_required_file(
         workspace / "logical-processors",
-        _SMALL_INPUT_MAX_BYTES,
+        max_bytes=_SMALL_INPUT_MAX_BYTES,
+        error_cls=HardwareParseError,
     )
 
     logical_processors = _parse_logical_processors(logical_raw)
@@ -40,23 +49,6 @@ def parse_hardware(workspace: Path) -> dict[str, Any]:
         "cpu": cpu,
         "memory_bytes": memory_bytes,
     }
-
-
-def _read_required(path: Path, maximum_bytes: int) -> str:
-    try:
-        if path.is_symlink() or not path.is_file():
-            raise HardwareParseError(f"required hardware input is missing: {path.name}")
-        with path.open("rb") as input_file:
-            raw = input_file.read(maximum_bytes + 1)
-    except OSError as error:
-        raise HardwareParseError(f"could not read hardware input {path.name}") from error
-
-    if len(raw) > maximum_bytes:
-        raise HardwareParseError(f"hardware input is too large: {path.name}")
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise HardwareParseError(f"hardware input is not UTF-8: {path.name}") from error
 
 
 def _parse_logical_processors(content: str) -> int:

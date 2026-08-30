@@ -1,3 +1,5 @@
+"""Normalise raw platform collector files into the snapshot schema."""
+
 from __future__ import annotations
 
 import re
@@ -6,6 +8,8 @@ from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from fleet_audit.collection._parsing import ParsingError, read_required_file
+
 _MAX_INPUT_BYTES = 65_536
 _OS_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _OS_ID = re.compile(r"^[a-z0-9._-]+$")
@@ -13,19 +17,34 @@ _PROC_SECONDS = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 _REQUIRED_OS_FIELDS = ("ID", "VERSION_ID", "PRETTY_NAME")
 
 
-class PlatformParseError(ValueError):
+class PlatformParseError(ParsingError):
     """Raised when raw platform output is missing or malformed."""
 
 
 def parse_platform(workspace: Path) -> dict[str, Any]:
     """Normalise raw platform collector files into the snapshot schema."""
-    os_release = _parse_os_release(_read_required(workspace / "os-release"))
-    kernel = _parse_single_line("kernel", _read_required(workspace / "kernel"))
+    os_release = _parse_os_release(
+        read_required_file(
+            workspace / "os-release", max_bytes=_MAX_INPUT_BYTES, error_cls=PlatformParseError
+        )
+    )
+    kernel = _parse_single_line(
+        "kernel",
+        read_required_file(
+            workspace / "kernel", max_bytes=_MAX_INPUT_BYTES, error_cls=PlatformParseError
+        ),
+    )
     architecture = _parse_single_line(
         "architecture",
-        _read_required(workspace / "architecture"),
+        read_required_file(
+            workspace / "architecture", max_bytes=_MAX_INPUT_BYTES, error_cls=PlatformParseError
+        ),
     )
-    uptime_seconds = _parse_uptime(_read_required(workspace / "uptime"))
+    uptime_seconds = _parse_uptime(
+        read_required_file(
+            workspace / "uptime", max_bytes=_MAX_INPUT_BYTES, error_cls=PlatformParseError
+        )
+    )
 
     return {
         "status": "complete",
@@ -38,23 +57,6 @@ def parse_platform(workspace: Path) -> dict[str, Any]:
         "architecture": architecture,
         "uptime_seconds": uptime_seconds,
     }
-
-
-def _read_required(path: Path) -> str:
-    try:
-        if path.is_symlink() or not path.is_file():
-            raise PlatformParseError(f"required platform input is missing: {path.name}")
-        with path.open("rb") as input_file:
-            raw = input_file.read(_MAX_INPUT_BYTES + 1)
-    except OSError as error:
-        raise PlatformParseError(f"could not read platform input {path.name}") from error
-
-    if len(raw) > _MAX_INPUT_BYTES:
-        raise PlatformParseError(f"platform input is too large: {path.name}")
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise PlatformParseError(f"platform input is not UTF-8: {path.name}") from error
 
 
 def _parse_os_release(content: str) -> dict[str, str]:
