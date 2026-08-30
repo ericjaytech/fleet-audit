@@ -1,0 +1,18 @@
+{
+  "blockdevices": [
+    {"name": "sdb", "type": "disk", "size": 200000000000},
+    {"name": "loop0", "type": "loop", "size": 1048576},
+    {
+      "name": "nvme0n1p1",
+      "type": "part",
+      "size": "99900000000",
+      "uuid": "excluded-uuid"
+    },
+    {
+      "name": "nvme0n1",
+      "type": "disk",
+      "size": 100000000000,
+      "serial": "excluded-serial"
+    }
+  ]
+}

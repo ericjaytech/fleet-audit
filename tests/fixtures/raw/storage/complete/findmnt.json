@@ -1,0 +1,40 @@
+{
+  "filesystems": [
+    {
+      "target": "/srv/team files",
+      "fstype": "xfs",
+      "size": "1000000000",
+      "used": "425000000",
+      "use%": "42.5%",
+      "uuid": "excluded-uuid"
+    },
+    {
+      "target": "/proc",
+      "fstype": "proc",
+      "size": 0,
+      "used": 0,
+      "use%": "-"
+    },
+    {
+      "target": "/run/user/1000/doc",
+      "fstype": "fuse.portal",
+      "size": null,
+      "used": null,
+      "use%": null
+    },
+    {
+      "target": "/",
+      "fstype": "ext4",
+      "size": 50000000000,
+      "used": 20000000000,
+      "use%": "40%"
+    },
+    {
+      "target": "/run",
+      "fstype": "tmpfs",
+      "size": 2000000000,
+      "used": 100000000,
+      "use%": "5%"
+    }
+  ]
+}
