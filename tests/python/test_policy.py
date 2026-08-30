@@ -1,16 +1,36 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from fleet_audit.policy import PolicyError, load_policy
+from fleet_audit.policy import (
+    FilesystemUsageCheck,
+    MaximumUptimeCheck,
+    PendingUpdatesCheck,
+    Policy,
+    PolicyError,
+    ProhibitedPortCheck,
+    RequiredServiceCheck,
+    evaluate_policy,
+    load_policy,
+)
+from fleet_audit.validation import validate_snapshot
+
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def write_policy(tmp_path: Path, content: str) -> Path:
     policy_path = tmp_path / "policy.toml"
     policy_path.write_text(content, encoding="utf-8")
     return policy_path
+
+
+def complete_snapshot() -> dict[str, Any]:
+    fixture = FIXTURES / "snapshots" / "complete.json"
+    return json.loads(fixture.read_text(encoding="utf-8"))
 
 
 def test_load_policy_parses_all_supported_check_types(tmp_path: Path) -> None:
@@ -167,3 +187,209 @@ def test_load_policy_rejects_invalid_boundaries(tmp_path: Path, content: str) ->
 
     with pytest.raises(PolicyError):
         load_policy(policy_path)
+
+
+@pytest.mark.parametrize(
+    ("used_percent", "expected_status"),
+    [(79.9, "PASS"), (80, "WARN"), (89.9, "WARN"), (90, "FAIL")],
+)
+def test_filesystem_usage_applies_inclusive_thresholds(
+    used_percent: float,
+    expected_status: str,
+) -> None:
+    snapshot = complete_snapshot()
+    snapshot["storage"]["filesystems"][0]["used_percent"] = used_percent
+    policy = Policy(
+        version=1,
+        checks=(FilesystemUsageCheck("disk.root", "/", 80, 90),),
+    )
+
+    result = evaluate_policy(policy, snapshot)[0]
+
+    assert result["status"] == expected_status
+    assert "80%" in result["evidence"]
+    assert "90%" in result["evidence"]
+
+
+@pytest.mark.parametrize(
+    ("pending_updates", "expected_status"),
+    [(0, "PASS"), (1, "WARN"), (19, "WARN"), (20, "FAIL")],
+)
+def test_pending_updates_applies_inclusive_thresholds(
+    pending_updates: int,
+    expected_status: str,
+) -> None:
+    snapshot = complete_snapshot()
+    snapshot["software"]["pending_updates"] = pending_updates
+    policy = Policy(
+        version=1,
+        checks=(PendingUpdatesCheck("updates.pending", 1, 20),),
+    )
+
+    result = evaluate_policy(policy, snapshot)[0]
+
+    assert result["status"] == expected_status
+
+
+@pytest.mark.parametrize(
+    ("uptime_seconds", "expected_status"),
+    [(2_592_000, "PASS"), (2_592_001, "FAIL")],
+)
+def test_maximum_uptime_allows_the_exact_limit(
+    uptime_seconds: int,
+    expected_status: str,
+) -> None:
+    snapshot = complete_snapshot()
+    snapshot["platform"]["uptime_seconds"] = uptime_seconds
+    policy = Policy(
+        version=1,
+        checks=(MaximumUptimeCheck("uptime.maximum", 30),),
+    )
+
+    result = evaluate_policy(policy, snapshot)[0]
+
+    assert result["status"] == expected_status
+
+
+@pytest.mark.parametrize(
+    ("service", "expected_status"),
+    [("ssh.service", "PASS"), ("chrony.service", "FAIL")],
+)
+def test_required_service_checks_enabled_service_inventory(
+    service: str,
+    expected_status: str,
+) -> None:
+    policy = Policy(
+        version=1,
+        checks=(RequiredServiceCheck("service.required", service),),
+    )
+
+    result = evaluate_policy(policy, complete_snapshot())[0]
+
+    assert result["status"] == expected_status
+
+
+@pytest.mark.parametrize(
+    ("protocol", "port", "expected_status"),
+    [("tcp", 22, "FAIL"), ("udp", 22, "PASS"), ("tcp", 23, "PASS")],
+)
+def test_prohibited_port_matches_protocol_and_port(
+    protocol: str,
+    port: int,
+    expected_status: str,
+) -> None:
+    policy = Policy(
+        version=1,
+        checks=(ProhibitedPortCheck("port.prohibited", protocol, port),),
+    )
+
+    result = evaluate_policy(policy, complete_snapshot())[0]
+
+    assert result["status"] == expected_status
+
+
+def test_unavailable_sources_produce_skip_results() -> None:
+    snapshot = complete_snapshot()
+    snapshot["storage"] = {"status": "unavailable", "devices": [], "filesystems": []}
+    snapshot["platform"] = {"status": "unavailable"}
+    snapshot["software"] = {
+        "status": "unavailable",
+        "package_manager": None,
+        "installed_packages": [],
+        "enabled_services": [],
+        "pending_updates": None,
+        "reboot_required": None,
+    }
+    snapshot["network"] = {
+        "status": "unavailable",
+        "interfaces": [],
+        "listening_sockets": [],
+    }
+    policy = Policy(
+        version=1,
+        checks=(
+            FilesystemUsageCheck("disk.root", "/", 80, 90),
+            PendingUpdatesCheck("updates.pending", 1, 20),
+            MaximumUptimeCheck("uptime.maximum", 30),
+            RequiredServiceCheck("service.required", "ssh.service"),
+            ProhibitedPortCheck("port.prohibited", "tcp", 22),
+        ),
+    )
+
+    results = evaluate_policy(policy, snapshot)
+
+    assert [result["status"] for result in results] == ["SKIP"] * 5
+
+
+def test_invalid_collected_values_produce_error_results() -> None:
+    snapshot = complete_snapshot()
+    snapshot["storage"]["filesystems"][0]["used_percent"] = "nearly full"
+    snapshot["platform"]["uptime_seconds"] = -1
+    snapshot["software"]["pending_updates"] = True
+    snapshot["software"]["enabled_services"] = [17]
+    snapshot["network"]["listening_sockets"] = [{"protocol": "tcp", "port": "22"}]
+    policy = Policy(
+        version=1,
+        checks=(
+            FilesystemUsageCheck("disk.root", "/", 80, 90),
+            PendingUpdatesCheck("updates.pending", 1, 20),
+            MaximumUptimeCheck("uptime.maximum", 30),
+            RequiredServiceCheck("service.required", "ssh.service"),
+            ProhibitedPortCheck("port.prohibited", "tcp", 22),
+        ),
+    )
+
+    results = evaluate_policy(policy, snapshot)
+
+    assert [result["status"] for result in results] == ["ERROR"] * 5
+
+
+@pytest.mark.parametrize(
+    ("warning_code", "check", "expected_status"),
+    [
+        ("FILESYSTEMS_UNAVAILABLE", FilesystemUsageCheck("disk.root", "/", 80, 90), "SKIP"),
+        ("FILESYSTEMS_INVALID", FilesystemUsageCheck("disk.root", "/", 80, 90), "ERROR"),
+        ("PENDING_UPDATES_UNAVAILABLE", PendingUpdatesCheck("updates", 1, 20), "SKIP"),
+        ("PENDING_UPDATES_INVALID", PendingUpdatesCheck("updates", 1, 20), "ERROR"),
+        ("SERVICES_UNAVAILABLE", RequiredServiceCheck("service", "ssh.service"), "SKIP"),
+        ("SERVICES_INVALID", RequiredServiceCheck("service", "ssh.service"), "ERROR"),
+        ("SOCKETS_UNAVAILABLE", ProhibitedPortCheck("port", "tcp", 22), "SKIP"),
+        ("SOCKETS_INVALID", ProhibitedPortCheck("port", "tcp", 22), "ERROR"),
+    ],
+)
+def test_partial_source_warnings_determine_skip_or_error(
+    warning_code: str,
+    check: object,
+    expected_status: str,
+) -> None:
+    snapshot = complete_snapshot()
+    collector = "storage" if warning_code.startswith("FILESYSTEMS") else "software"
+    if warning_code.startswith("SOCKETS"):
+        collector = "network"
+    snapshot[collector]["status"] = "partial"
+    snapshot["collection"]["warnings"] = [
+        {"collector": collector, "code": warning_code, "message": "Synthetic warning."}
+    ]
+    policy = Policy(version=1, checks=(check,))  # type: ignore[arg-type]
+
+    result = evaluate_policy(policy, snapshot)[0]
+
+    assert result["status"] == expected_status
+
+
+def test_results_are_schema_valid_and_do_not_echo_sensitive_policy_targets() -> None:
+    snapshot = complete_snapshot()
+    policy = Policy(
+        version=1,
+        checks=(
+            FilesystemUsageCheck("disk.private", "/home/alice/private", 80, 90),
+            RequiredServiceCheck("service.private", "alice-private.service"),
+        ),
+    )
+
+    snapshot["checks"] = evaluate_policy(policy, snapshot)
+    validate_snapshot(snapshot)
+
+    evidence = " ".join(result["evidence"] for result in snapshot["checks"])
+    assert "alice" not in evidence
+    assert "/home" not in evidence
