@@ -8,10 +8,10 @@ setup() {
     mkdir -- "${fake_bin}" "${workspace}"
 
     printf '%s\n' '#!/usr/bin/env bash' \
-        'printf '\''{"blockdevices": [{"name": "sda", "type": "disk", "size": 1024}]}\\n'\''' \
+        'printf '\''%s\n'\'' '\''{"blockdevices": [{"name": "sda", "type": "disk", "size": 1024}]}'\''' \
         >"${fake_bin}/lsblk"
     printf '%s\n' '#!/usr/bin/env bash' \
-        'printf '\''{"filesystems": [{"target": "/", "fstype": "ext4", "size": 1024, "used": 512, "use%": "50%"}]}\\n'\''' \
+        'printf '\''%s\n'\'' '\''{"filesystems": [{"target": "/", "fstype": "ext4", "size": 1024, "used": 512, "use%": "50%"}]}'\''' \
         >"${fake_bin}/findmnt"
     chmod 0700 "${fake_bin}/lsblk" "${fake_bin}/findmnt"
 }
