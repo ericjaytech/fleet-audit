@@ -31,7 +31,7 @@ def test_version_reports_program_name_and_release() -> None:
     result = run_cli("--version")
 
     assert result.returncode == 0
-    assert result.stdout == "fleet-audit 0.1.0\n"
+    assert result.stdout == "fleet-audit 0.1.1\n"
     assert result.stderr == ""
 
 
@@ -49,6 +49,28 @@ def test_collect_help_documents_policy_input() -> None:
 
     assert result.returncode == 0
     assert "--policy POLICY" in result.stdout
+    assert "--dry-run" in result.stdout
+
+
+def test_collect_dry_run_validates_without_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = FIXTURES / "snapshots" / "complete.json"
+    snapshot: dict[str, Any] = json.loads(fixture.read_text(encoding="utf-8"))
+    monkeypatch.setattr(cli, "collect_snapshot", lambda *, label: snapshot)
+
+    exit_code = cli.main(["collect", "--label", "demo-host", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out == (
+        "Dry run complete: 2 capabilities available, 0 unavailable, 0 warnings. "
+        "No snapshot was written.\n"
+    )
+    assert captured.err == ""
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_invalid_policy_fails_before_collection(tmp_path: Path) -> None:
