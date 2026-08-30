@@ -204,6 +204,84 @@ def test_hardware_parser_failure_preserves_successful_platform_data(tmp_path: Pa
     ]
 
 
+def test_partial_storage_preserves_filesystems_and_reports_scoped_warning(
+    tmp_path: Path,
+) -> None:
+    storage_collector = write_collector(
+        tmp_path,
+        'printf "unavailable\\n" > "${1}/lsblk.error"\n'
+        "printf '%s\\n' "
+        '\'{"filesystems": [{"target": "/", "fstype": "ext4", '
+        '"size": 1024, "used": 512, "use%": "50%"}]}\' '
+        '> "${1}/findmnt.json"\n',
+        "storage.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"storage": storage_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["storage"] == {
+        "status": "partial",
+        "devices": [],
+        "filesystems": [
+            {
+                "mountpoint": "/",
+                "filesystem_type": "ext4",
+                "size_bytes": 1024,
+                "used_bytes": 512,
+                "used_percent": 50,
+            }
+        ],
+    }
+    assert snapshot["collection"]["capabilities"] == [{"name": "storage", "status": "available"}]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "storage",
+            "code": "BLOCK_DEVICES_UNAVAILABLE",
+            "message": "Block-device inventory is unavailable on this host.",
+        }
+    ]
+
+
+def test_invalid_storage_output_uses_schema_valid_unavailable_domain(
+    tmp_path: Path,
+) -> None:
+    storage_collector = write_collector(
+        tmp_path,
+        'printf "not-json\\n" > "${1}/lsblk.json"\nprintf "not-json\\n" > "${1}/findmnt.json"\n',
+        "storage.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"storage": storage_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["storage"] == {
+        "status": "unavailable",
+        "devices": [],
+        "filesystems": [],
+    }
+    assert snapshot["collection"]["capabilities"] == [
+        {
+            "name": "storage",
+            "status": "error",
+            "detail": ("Collector output was invalid: no valid storage inventory source remains."),
+        }
+    ]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "storage",
+            "code": "COLLECTOR_OUTPUT_INVALID",
+            "message": ("Collector output was invalid: no valid storage inventory source remains."),
+        }
+    ]
+
+
 def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> None:
     output = tmp_path / "snapshot.json"
 
@@ -225,9 +303,13 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     assert snapshot["hardware"]["status"] in {"complete", "partial"}
     assert snapshot["hardware"]["cpu"]["logical_processors"] >= 1
     assert snapshot["hardware"]["memory_bytes"] > 0
+    assert snapshot["storage"]["status"] in {"complete", "partial"}
+    assert isinstance(snapshot["storage"]["devices"], list)
+    assert isinstance(snapshot["storage"]["filesystems"], list)
     assert snapshot["collection"]["capabilities"] == [
         {"name": "platform", "status": "available"},
         {"name": "hardware", "status": "available"},
+        {"name": "storage", "status": "available"},
     ]
 
 
