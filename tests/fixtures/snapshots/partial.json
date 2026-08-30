@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "fleet-audit",
+    "version": "0.1.0"
+  },
+  "collected_at": "2026-08-29T12:05:00Z",
+  "host": {
+    "label": "host"
+  },
+  "platform": {
+    "status": "unavailable"
+  },
+  "hardware": {
+    "status": "unavailable"
+  },
+  "storage": {
+    "status": "unavailable",
+    "devices": [],
+    "filesystems": []
+  },
+  "network": {
+    "status": "unavailable",
+    "interfaces": [],
+    "listening_sockets": []
+  },
+  "software": {
+    "status": "unavailable",
+    "package_manager": null,
+    "installed_packages": [],
+    "enabled_services": [],
+    "pending_updates": null,
+    "reboot_required": null
+  },
+  "checks": [],
+  "collection": {
+    "status": "partial",
+    "privilege_level": "non-root",
+    "duration_ms": 24,
+    "capabilities": [
+      {
+        "name": "platform",
+        "status": "unavailable",
+        "detail": "Collector command was not available."
+      }
+    ],
+    "warnings": [
+      {
+        "collector": "platform",
+        "code": "COMMAND_UNAVAILABLE",
+        "message": "Platform facts could not be collected."
+      }
+    ]
+  }
+}
