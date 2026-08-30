@@ -71,6 +71,32 @@ teardown() {
         $'interfaces.tsv\nsockets.error' ]
 }
 
+@test "network collector rejects empty ip output without losing sockets" {
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${fake_bin}/ip"
+    chmod 0700 "${fake_bin}/ip"
+
+    run env PATH="${fake_bin}:/usr/bin:/bin" /bin/bash \
+        "${project_root}/src/fleet_audit/collectors/network.sh" "${workspace}"
+
+    [ "${status}" -eq 0 ]
+    [ "$(find "${workspace}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = \
+        $'interfaces.error\nsockets.tsv' ]
+}
+
+@test "network collector rejects malformed ss output without losing interfaces" {
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'printf '\''%s\n'\'' '\''tcp LISTEN unexpected-output'\''' \
+        >"${fake_bin}/ss"
+    chmod 0700 "${fake_bin}/ss"
+
+    run env PATH="${fake_bin}:/usr/bin:/bin" /bin/bash \
+        "${project_root}/src/fleet_audit/collectors/network.sh" "${workspace}"
+
+    [ "${status}" -eq 0 ]
+    [ "$(find "${workspace}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = \
+        $'interfaces.tsv\nsockets.error' ]
+}
+
 @test "network collector reports unavailable when ip and ss both fail" {
     printf '%s\n' '#!/usr/bin/env bash' 'exit 127' >"${fake_bin}/ip"
     printf '%s\n' '#!/usr/bin/env bash' 'exit 127' >"${fake_bin}/ss"
