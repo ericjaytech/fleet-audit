@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -211,3 +212,21 @@ def test_host_label_mismatch_requires_explicit_acknowledgement() -> None:
     assert comparison.status == "unchanged"
     assert comparison.baseline_label == "demo-web-01"
     assert comparison.current_label == "demo-web-02"
+
+
+def test_changed_fixture_exercises_each_initial_comparison_category() -> None:
+    baseline = complete_snapshot()
+    current = json.loads((FIXTURES / "changed.json").read_text(encoding="utf-8"))
+
+    comparison = compare_snapshots(baseline, current)
+
+    assert comparison.change_count == 13
+    assert Counter(change.category for change in comparison.changes) == {
+        "platform": 1,
+        "packages": 3,
+        "services": 1,
+        "ports": 3,
+        "software": 2,
+        "checks": 2,
+        "capabilities": 1,
+    }

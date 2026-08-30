@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "fleet-audit",
+    "version": "0.1.0"
+  },
+  "collected_at": "2026-08-30T12:00:00Z",
+  "host": {
+    "label": "demo-web-01"
+  },
+  "platform": {
+    "status": "complete",
+    "os": {
+      "id": "ubuntu",
+      "version_id": "24.04",
+      "pretty_name": "Ubuntu 24.04 LTS"
+    },
+    "kernel": "6.9.0-example-generic",
+    "architecture": "x86_64",
+    "uptime_seconds": 518400
+  },
+  "hardware": {
+    "status": "complete",
+    "cpu": {
+      "model": "Example Virtual CPU",
+      "logical_processors": 4
+    },
+    "memory_bytes": 8589934592
+  },
+  "storage": {
+    "status": "complete",
+    "devices": [
+      {
+        "name": "vda",
+        "type": "disk",
+        "size_bytes": 107374182400
+      }
+    ],
+    "filesystems": [
+      {
+        "mountpoint": "/",
+        "filesystem_type": "ext4",
+        "size_bytes": 105226698752,
+        "used_bytes": 89442693939,
+        "used_percent": 85.0
+      }
+    ]
+  },
+  "network": {
+    "status": "complete",
+    "interfaces": [
+      {
+        "name": "eth0",
+        "state": "up"
+      }
+    ],
+    "listening_sockets": [
+      {
+        "protocol": "tcp",
+        "port": 22,
+        "bind_scope": "loopback"
+      },
+      {
+        "protocol": "tcp",
+        "port": 8080,
+        "bind_scope": "wildcard"
+      }
+    ]
+  },
+  "software": {
+    "status": "complete",
+    "package_manager": "dpkg",
+    "installed_packages": [
+      {
+        "name": "bash",
+        "version": "5.3-example",
+        "architecture": "amd64"
+      },
+      {
+        "name": "curl",
+        "version": "8.5-example",
+        "architecture": "amd64"
+      }
+    ],
+    "enabled_services": [
+      "nginx.service",
+      "ssh.service"
+    ],
+    "pending_updates": 0,
+    "reboot_required": true
+  },
+  "checks": [
+    {
+      "id": "disk.root.utilisation",
+      "status": "WARN",
+      "summary": "Root filesystem utilisation reached the warning threshold.",
+      "evidence": "85.0% used; warning threshold 80.0%."
+    },
+    {
+      "id": "updates.pending",
+      "status": "PASS",
+      "summary": "No package updates are pending.",
+      "evidence": "0 updates reported by the existing local package index."
+    }
+  ],
+  "collection": {
+    "status": "complete",
+    "privilege_level": "non-root",
+    "duration_ms": 176,
+    "capabilities": [
+      {
+        "name": "network",
+        "status": "available"
+      },
+      {
+        "name": "platform",
+        "status": "available"
+      },
+      {
+        "name": "software",
+        "status": "available"
+      }
+    ],
+    "warnings": []
+  }
+}
