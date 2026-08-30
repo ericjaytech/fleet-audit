@@ -31,6 +31,15 @@ if [[ ! "${logical_processors}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 umask 077
-cp -- "${cpuinfo}" "${workspace}/cpuinfo"
+awk -F ':' '
+    {
+        key = $1
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+        if (key == "model name" || key == "Model Name" || key == "Processor" ||
+            key == "cpu" || key == "CPU") {
+            print $0
+        }
+    }
+' "${cpuinfo}" >"${workspace}/cpuinfo"
 cp -- "${meminfo}" "${workspace}/meminfo"
 printf '%s\n' "${logical_processors}" >"${workspace}/logical-processors"

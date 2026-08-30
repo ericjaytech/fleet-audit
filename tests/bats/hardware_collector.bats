@@ -6,7 +6,8 @@ setup() {
     source_root="${test_root}/source"
     workspace="${test_root}/workspace"
     mkdir -p -- "${source_root}/proc" "${workspace}"
-    printf 'processor : 0\nmodel name : Test CPU\n' >"${source_root}/proc/cpuinfo"
+    printf 'processor : 0\nmodel name : Test CPU\nHardware : Test Board\nSerial : 0001\n' \
+        >"${source_root}/proc/cpuinfo"
     printf 'MemTotal: 1024 kB\n' >"${source_root}/proc/meminfo"
 }
 
@@ -25,7 +26,8 @@ teardown() {
     [ "$(find "${workspace}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" = \
         $'cpuinfo\nlogical-processors\nmeminfo' ]
     [ "$(find "${source_root}" -type f -exec sha256sum {} + | sort)" = "${source_before}" ]
-    cmp "${source_root}/proc/cpuinfo" "${workspace}/cpuinfo"
+    [ "$(<"${workspace}/cpuinfo")" = "model name : Test CPU" ]
+    ! grep -Eq '^(Hardware|Serial)[[:space:]]*:' "${workspace}/cpuinfo"
     cmp "${source_root}/proc/meminfo" "${workspace}/meminfo"
     [[ "$(<"${workspace}/logical-processors")" =~ ^[1-9][0-9]*$ ]]
 }
