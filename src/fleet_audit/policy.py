@@ -482,9 +482,12 @@ def _parse_check(raw_check: dict[str, Any], location: str) -> PolicyCheck:
         warning = _percentage(raw_check["warn_percent"], f"{location}.warn_percent")
         failure = _percentage(raw_check["fail_percent"], f"{location}.fail_percent")
         _validate_threshold_order(warning, failure, location)
+        mountpoint = _text(raw_check["mountpoint"], f"{location}.mountpoint")
+        if not mountpoint.startswith("/"):
+            raise PolicyError(f"{location}.mountpoint: expected an absolute path")
         return FilesystemUsageCheck(
             id=check_id,
-            mountpoint=_text(raw_check["mountpoint"], f"{location}.mountpoint"),
+            mountpoint=mountpoint,
             warn_percent=warning,
             fail_percent=failure,
         )
@@ -509,10 +512,10 @@ def _parse_check(raw_check: dict[str, Any], location: str) -> PolicyCheck:
 
     if check_type == "required_service":
         _require_fields(raw_check, {"id", "type", "service"}, location)
-        return RequiredServiceCheck(
-            id=check_id,
-            service=_text(raw_check["service"], f"{location}.service"),
-        )
+        service = _text(raw_check["service"], f"{location}.service")
+        if not service.endswith(".service"):
+            raise PolicyError(f"{location}.service: expected a systemd service unit name")
+        return RequiredServiceCheck(id=check_id, service=service)
 
     if check_type == "prohibited_port":
         _require_fields(raw_check, {"id", "type", "protocol", "port"}, location)
@@ -534,9 +537,7 @@ def _require_fields(raw_check: dict[str, Any], expected: set[str], location: str
         raise PolicyError(f"{location}: missing field: {missing[0]}")
 
 
-def _reject_unknown_fields(
-    document: dict[str, Any], expected: set[str], location: str
-) -> None:
+def _reject_unknown_fields(document: dict[str, Any], expected: set[str], location: str) -> None:
     unknown = sorted(document.keys() - expected)
     if unknown:
         raise PolicyError(f"{location}: unknown field: {unknown[0]}")
@@ -586,6 +587,4 @@ def _percentage(value: object, location: str) -> float:
 
 def _validate_threshold_order(warning: float, failure: float, location: str) -> None:
     if warning >= failure:
-        raise PolicyError(
-            f"{location}: warning threshold must be less than failure threshold"
-        )
+        raise PolicyError(f"{location}: warning threshold must be less than failure threshold")

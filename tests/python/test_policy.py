@@ -11,6 +11,7 @@ from fleet_audit.policy import (
     MaximumUptimeCheck,
     PendingUpdatesCheck,
     Policy,
+    PolicyCheck,
     PolicyError,
     ProhibitedPortCheck,
     RequiredServiceCheck,
@@ -193,6 +194,22 @@ type = "prohibited_port"
 protocol = "tcp"
 port = 65536
 """,
+        """
+version = 1
+[[checks]]
+id = "disk.invalid"
+type = "filesystem_usage"
+mountpoint = "relative/path"
+warn_percent = 80
+fail_percent = 90
+""",
+        """
+version = 1
+[[checks]]
+id = "service.invalid"
+type = "required_service"
+service = "ssh"
+""",
     ],
 )
 def test_load_policy_rejects_invalid_boundaries(tmp_path: Path, content: str) -> None:
@@ -372,7 +389,7 @@ def test_invalid_collected_values_produce_error_results() -> None:
 )
 def test_partial_source_warnings_determine_skip_or_error(
     warning_code: str,
-    check: object,
+    check: PolicyCheck,
     expected_status: str,
 ) -> None:
     snapshot = complete_snapshot()
@@ -383,7 +400,7 @@ def test_partial_source_warnings_determine_skip_or_error(
     snapshot["collection"]["warnings"] = [
         {"collector": collector, "code": warning_code, "message": "Synthetic warning."}
     ]
-    policy = Policy(version=1, checks=(check,))  # type: ignore[arg-type]
+    policy = Policy(version=1, checks=(check,))
 
     result = evaluate_policy(policy, snapshot)[0]
 
