@@ -41,7 +41,7 @@ Python creates a temporary collection workspace with owner-only permissions. Col
 
 ## Failure semantics
 
-Unavailable or inaccessible data is not evidence that a machine is compliant. Fleet Audit records missing capabilities as `unavailable`, check results as `SKIP` or `ERROR`, and the overall collection as `partial` where appropriate. Reports must preserve these states.
+Unavailable or inaccessible data is not evidence that a machine is compliant. Fleet Audit records missing capabilities as `unavailable`, check results as `SKIP` or `ERROR`, and the overall collection as `partial` where appropriate. Validation and comparison preserve these states.
 
 ## Safe demonstrations
 
