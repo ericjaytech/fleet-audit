@@ -63,10 +63,7 @@ def run_collector(
     try:
         exit_code = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        _terminate_process_group(process.pid)
         process.wait()
         return CollectorResult(
             name=name,
@@ -76,6 +73,7 @@ def run_collector(
             issue_code="COLLECTOR_TIMEOUT",
         )
 
+    _terminate_process_group(process.pid)
     if exit_code == 0:
         output_issue = _validate_collector_output(workspace, existing_artifacts)
         if output_issue is not None:
@@ -103,6 +101,13 @@ def run_collector(
         f"Collector exited with code {exit_code}.",
         "COLLECTOR_EXIT_ERROR",
     )
+
+
+def _terminate_process_group(process_id: int) -> None:
+    try:
+        os.killpg(process_id, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _artifact_fingerprints(workspace: Path) -> dict[str, tuple[int, int, int, int]]:

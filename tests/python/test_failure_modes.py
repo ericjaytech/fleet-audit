@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,22 @@ def test_collector_cannot_replace_an_existing_workspace_artifact(tmp_path: Path)
 
     assert result.status is CollectorStatus.ERROR
     assert result.issue_code == "COLLECTOR_WORKSPACE_VIOLATION"
+
+
+def test_successful_collector_cannot_leave_background_children(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    late_artifact = workspace / "late"
+    collector = write_collector(
+        tmp_path,
+        '(sleep 0.1; printf "late\\n" > "${1}/late") &\nexit 0\n',
+    )
+
+    result = run_collector("platform", collector, workspace, timeout_seconds=1)
+    time.sleep(0.2)
+
+    assert result.status is CollectorStatus.AVAILABLE
+    assert not late_artifact.exists()
 
 
 @pytest.mark.parametrize("path_kind", ["missing", "symlink"])
