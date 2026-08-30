@@ -8,6 +8,7 @@ from time import monotonic
 from typing import Any
 
 from fleet_audit import __version__
+from fleet_audit.collection.os_parser import PlatformParseError, parse_platform
 from fleet_audit.collection.runner import CollectorResult, CollectorStatus, run_collector
 from fleet_audit.collection.workspace import secure_workspace
 from fleet_audit.validation import validate_snapshot
@@ -27,48 +28,50 @@ def collect_snapshot(
     started_at = monotonic()
 
     with secure_workspace(parent=workspace_parent) as workspace:
-        result = _run_stub_collector(collector_path, workspace, timeout_seconds)
+        result = _run_platform_collector(collector_path, workspace, timeout_seconds)
+        platform: dict[str, Any] = {"status": "unavailable"}
+        warning_code: str | None = None
         if result.status is CollectorStatus.AVAILABLE:
-            _parse_stub_result(workspace)
+            try:
+                platform = parse_platform(workspace)
+            except PlatformParseError as error:
+                result = CollectorResult(
+                    name="platform",
+                    status=CollectorStatus.ERROR,
+                    exit_code=result.exit_code,
+                    detail=f"Collector output was invalid: {error}.",
+                )
+                warning_code = "COLLECTOR_OUTPUT_INVALID"
 
-    snapshot = _minimal_snapshot(label, result, started_at)
+    snapshot = _snapshot(label, platform, result, started_at, warning_code)
     validate_snapshot(snapshot)
     return snapshot
 
 
-def _run_stub_collector(
+def _run_platform_collector(
     collector_path: Path | None,
     workspace: Path,
     timeout_seconds: float,
 ) -> CollectorResult:
     if collector_path is not None:
-        return run_collector("stub", collector_path, workspace, timeout_seconds=timeout_seconds)
+        return run_collector("platform", collector_path, workspace, timeout_seconds=timeout_seconds)
 
-    collector_resource = files("fleet_audit.collectors").joinpath("stub.sh")
+    collector_resource = files("fleet_audit.collectors").joinpath("os.sh")
     with as_file(collector_resource) as packaged_collector:
         return run_collector(
-            "stub",
+            "platform",
             packaged_collector,
             workspace,
             timeout_seconds=timeout_seconds,
         )
 
 
-def _parse_stub_result(workspace: Path) -> None:
-    status_path = workspace / "stub.status"
-    try:
-        status = status_path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise CollectionError("stub collector did not produce its expected output") from error
-
-    if status != "ready\n":
-        raise CollectionError("unexpected stub output")
-
-
-def _minimal_snapshot(
+def _snapshot(
     label: str,
+    platform: dict[str, Any],
     result: CollectorResult,
     started_at: float,
+    warning_code: str | None,
 ) -> dict[str, Any]:
     capability = {"name": result.name, "status": result.status.value}
     if result.detail is not None:
@@ -79,7 +82,8 @@ def _minimal_snapshot(
         warnings.append(
             {
                 "collector": result.name,
-                "code": (
+                "code": warning_code
+                or (
                     "CAPABILITY_UNAVAILABLE"
                     if result.status is CollectorStatus.UNAVAILABLE
                     else "COLLECTOR_ERROR"
@@ -93,7 +97,7 @@ def _minimal_snapshot(
         "tool": {"name": "fleet-audit", "version": __version__},
         "collected_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "host": {"label": label},
-        "platform": {"status": "unavailable"},
+        "platform": platform,
         "hardware": {"status": "unavailable"},
         "storage": {"status": "unavailable", "devices": [], "filesystems": []},
         "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},

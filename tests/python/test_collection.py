@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_audit.collection import CollectionError, collect_snapshot
+from fleet_audit.collection import collect_snapshot
 from fleet_audit.collection.runner import CollectorStatus, run_collector
 from fleet_audit.collection.workspace import secure_workspace
 from fleet_audit.validation import validate_snapshot
@@ -124,7 +124,7 @@ def test_timeout_snapshot_preserves_error_and_removes_workspace(tmp_path: Path) 
 
     assert snapshot["collection"]["capabilities"] == [
         {
-            "name": "stub",
+            "name": "platform",
             "status": "error",
             "detail": "Collector exceeded its 0.01 second timeout.",
         }
@@ -135,16 +135,27 @@ def test_timeout_snapshot_preserves_error_and_removes_workspace(tmp_path: Path) 
 def test_parser_failure_removes_collection_workspace(tmp_path: Path) -> None:
     collector = write_collector(
         tmp_path,
-        'printf "unexpected\\n" > "${1}/stub.status"\n',
+        'printf "not-an-assignment\\n" > "${1}/os-release"\n'
+        'printf "6.8.0\\n" > "${1}/kernel"\n'
+        'printf "x86_64\\n" > "${1}/architecture"\n'
+        'printf "1.0 2.0\\n" > "${1}/uptime"\n',
     )
 
-    with pytest.raises(CollectionError, match="unexpected stub output"):
-        collect_snapshot(
-            label="test-host",
-            collector_path=collector,
-            workspace_parent=tmp_path,
-        )
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_path=collector,
+        workspace_parent=tmp_path,
+    )
 
+    assert snapshot["platform"] == {"status": "unavailable"}
+    assert snapshot["collection"]["capabilities"] == [
+        {
+            "name": "platform",
+            "status": "error",
+            "detail": "Collector output was invalid: invalid os-release assignment at line 1.",
+        }
+    ]
+    assert snapshot["collection"]["warnings"][0]["code"] == "COLLECTOR_OUTPUT_INVALID"
     assert list(tmp_path.glob("fleet-audit-*")) == []
 
 
@@ -161,7 +172,12 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     snapshot = json.loads(output.read_text(encoding="utf-8"))
     validate_snapshot(snapshot)
     assert snapshot["host"] == {"label": "demo-host"}
-    assert snapshot["collection"]["capabilities"] == [{"name": "stub", "status": "available"}]
+    assert snapshot["platform"]["status"] == "complete"
+    assert snapshot["platform"]["os"]["id"]
+    assert snapshot["platform"]["kernel"]
+    assert snapshot["platform"]["architecture"]
+    assert snapshot["platform"]["uptime_seconds"] >= 0
+    assert snapshot["collection"]["capabilities"] == [{"name": "platform", "status": "available"}]
 
 
 def test_collect_command_does_not_overwrite_existing_file(tmp_path: Path) -> None:
