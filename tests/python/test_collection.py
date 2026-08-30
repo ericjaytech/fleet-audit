@@ -350,6 +350,94 @@ def test_invalid_network_output_uses_schema_valid_unavailable_domain(
     ]
 
 
+def test_partial_software_preserves_available_facts_and_reports_scoped_warnings(
+    tmp_path: Path,
+) -> None:
+    software_collector = write_collector(
+        tmp_path,
+        'printf "unavailable\\n" > "${1}/packages.error"\n'
+        'printf "ssh.service\\n" > "${1}/services.txt"\n'
+        'printf "2\\n" > "${1}/pending-updates.txt"\n'
+        'printf "false\\n" > "${1}/reboot-required.txt"\n',
+        "software.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"software": software_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["software"] == {
+        "status": "partial",
+        "package_manager": None,
+        "installed_packages": [],
+        "enabled_services": ["ssh.service"],
+        "pending_updates": 2,
+        "reboot_required": False,
+    }
+    assert snapshot["collection"]["capabilities"] == [{"name": "software", "status": "available"}]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "software",
+            "code": "PACKAGES_UNAVAILABLE",
+            "message": "Installed-package inventory is unavailable on this host.",
+        },
+        {
+            "collector": "software",
+            "code": "APT_INDEX_NOT_REFRESHED",
+            "message": (
+                "Pending-update count uses local package indexes, which may be stale; "
+                "no index refresh was performed."
+            ),
+        },
+    ]
+
+
+def test_invalid_software_output_uses_schema_valid_unavailable_domain(
+    tmp_path: Path,
+) -> None:
+    software_collector = write_collector(
+        tmp_path,
+        'printf "invalid\\n" > "${1}/packages.tsv"\n'
+        'printf "invalid\\n" > "${1}/services.txt"\n'
+        'printf "invalid\\n" > "${1}/pending-updates.txt"\n'
+        'printf "invalid\\n" > "${1}/reboot-required.txt"\n',
+        "software.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"software": software_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["software"] == {
+        "status": "unavailable",
+        "package_manager": None,
+        "installed_packages": [],
+        "enabled_services": [],
+        "pending_updates": None,
+        "reboot_required": None,
+    }
+    assert snapshot["collection"]["capabilities"] == [
+        {
+            "name": "software",
+            "status": "error",
+            "detail": ("Collector output was invalid: no valid software inventory source remains."),
+        }
+    ]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "software",
+            "code": "COLLECTOR_OUTPUT_INVALID",
+            "message": (
+                "Collector output was invalid: no valid software inventory source remains."
+            ),
+        }
+    ]
+
+
 def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> None:
     output = tmp_path / "snapshot.json"
 
@@ -377,12 +465,34 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     assert snapshot["network"]["status"] in {"complete", "partial"}
     assert isinstance(snapshot["network"]["interfaces"], list)
     assert isinstance(snapshot["network"]["listening_sockets"], list)
-    assert snapshot["collection"]["capabilities"] == [
+    assert snapshot["software"]["status"] in {"complete", "partial", "unavailable"}
+    assert snapshot["collection"]["capabilities"][:4] == [
         {"name": "platform", "status": "available"},
         {"name": "hardware", "status": "available"},
         {"name": "storage", "status": "available"},
         {"name": "network", "status": "available"},
     ]
+    software_capability = snapshot["collection"]["capabilities"][4]
+    assert software_capability["name"] == "software"
+    if snapshot["software"]["status"] == "unavailable":
+        assert software_capability["status"] == "error"
+        assert snapshot["software"] == {
+            "status": "unavailable",
+            "package_manager": None,
+            "installed_packages": [],
+            "enabled_services": [],
+            "pending_updates": None,
+            "reboot_required": None,
+        }
+    else:
+        assert software_capability == {"name": "software", "status": "available"}
+        assert snapshot["software"]["package_manager"] in {"dpkg", None}
+        assert isinstance(snapshot["software"]["installed_packages"], list)
+        assert isinstance(snapshot["software"]["enabled_services"], list)
+        assert snapshot["software"]["pending_updates"] is None or isinstance(
+            snapshot["software"]["pending_updates"], int
+        )
+        assert isinstance(snapshot["software"]["reboot_required"], bool)
 
 
 def test_collect_command_does_not_overwrite_existing_file(tmp_path: Path) -> None:
