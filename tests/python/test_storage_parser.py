@@ -54,13 +54,36 @@ def test_storage_fixture_is_normalised_and_sorted_without_identifiers() -> None:
     assert "excluded-serial" not in rendered
 
 
-def test_filesystems_without_capacity_are_skipped() -> None:
+def test_known_pseudo_filesystem_without_capacity_is_skipped() -> None:
     result = parse_storage(FIXTURES / "complete")
 
     mountpoints = {item["mountpoint"] for item in result.storage["filesystems"]}
 
     assert "/proc" not in mountpoints
-    assert "/run/user/1000/doc" not in mountpoints
+    assert result.warnings == ()
+
+
+def test_unmeasurable_filesystem_is_omitted_with_scoped_warning(tmp_path: Path) -> None:
+    (tmp_path / "lsblk.json").write_bytes((FIXTURES / "complete" / "lsblk.json").read_bytes())
+    (tmp_path / "findmnt.json").write_text(
+        '{"filesystems": ['
+        '{"target": "/", "fstype": "ext4", "size": 1024, "used": 512, "use%": "50%"},'
+        '{"target": "/inaccessible", "fstype": "fuse", "size": null, '
+        '"used": null, "use%": null}'
+        "]}",
+        encoding="utf-8",
+    )
+
+    result = parse_storage(tmp_path)
+
+    assert result.storage["status"] == "partial"
+    assert [item["mountpoint"] for item in result.storage["filesystems"]] == ["/"]
+    assert result.warnings == (
+        StorageWarning(
+            code="FILESYSTEMS_INCOMPLETE",
+            message=("Some mounted filesystems did not expose capacity data and were omitted."),
+        ),
+    )
 
 
 def test_unavailable_block_devices_preserve_filesystems(tmp_path: Path) -> None:

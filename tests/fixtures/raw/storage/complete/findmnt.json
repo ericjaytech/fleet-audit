@@ -16,13 +16,6 @@
       "use%": "-"
     },
     {
-      "target": "/run/user/1000/doc",
-      "fstype": "fuse.portal",
-      "size": null,
-      "used": null,
-      "use%": null
-    },
-    {
       "target": "/",
       "fstype": "ext4",
       "size": 50000000000,

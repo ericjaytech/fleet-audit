@@ -62,7 +62,19 @@ def parse_storage(workspace: Path) -> StorageParseResult:
         )
     else:
         try:
-            filesystems = _parse_filesystems(_load_json(workspace / "findmnt.json"))
+            filesystems, omitted_filesystems = _parse_filesystems(
+                _load_json(workspace / "findmnt.json")
+            )
+            if omitted_filesystems:
+                warnings.append(
+                    StorageWarning(
+                        code="FILESYSTEMS_INCOMPLETE",
+                        message=(
+                            "Some mounted filesystems did not expose capacity data and "
+                            "were omitted."
+                        ),
+                    )
+                )
         except StorageParseError:
             warnings.append(
                 StorageWarning(
@@ -76,7 +88,11 @@ def parse_storage(workspace: Path) -> StorageParseResult:
 
     return StorageParseResult(
         storage={
-            "status": "complete" if devices is not None and filesystems is not None else "partial",
+            "status": (
+                "complete"
+                if devices is not None and filesystems is not None and not warnings
+                else "partial"
+            ),
             "devices": devices or [],
             "filesystems": filesystems or [],
         },
@@ -122,13 +138,18 @@ def _parse_devices(document: object) -> list[dict[str, Any]]:
     return sorted(devices, key=lambda item: (item["name"], item["type"], item["size_bytes"]))
 
 
-def _parse_filesystems(document: object) -> list[dict[str, Any]]:
+def _parse_filesystems(document: object) -> tuple[list[dict[str, Any]], bool]:
     items = _document_items(document, "filesystems")
     filesystems: list[dict[str, Any]] = []
+    omitted_filesystems = False
     for item in items:
         if not isinstance(item, dict):
             raise StorageParseError("invalid filesystem entry")
-        used_percent = _percentage(item.get("use%"))
+        raw_percentage = item.get("use%")
+        if raw_percentage is None:
+            omitted_filesystems = True
+            continue
+        used_percent = _percentage(raw_percentage)
         if used_percent is None:
             continue
 
@@ -149,9 +170,12 @@ def _parse_filesystems(document: object) -> list[dict[str, Any]]:
                 "used_percent": used_percent,
             }
         )
-    return sorted(
-        filesystems,
-        key=lambda item: (item["mountpoint"], item["filesystem_type"]),
+    return (
+        sorted(
+            filesystems,
+            key=lambda item: (item["mountpoint"], item["filesystem_type"]),
+        ),
+        omitted_filesystems,
     )
 
 
@@ -186,7 +210,7 @@ def _nonnegative_integer(value: object, field: str) -> int:
 
 
 def _percentage(value: object) -> int | float | None:
-    if value is None or value == "-":
+    if value == "-":
         return None
     if not isinstance(value, str) or len(value) > 32:
         raise StorageParseError("invalid filesystem utilisation percentage")
