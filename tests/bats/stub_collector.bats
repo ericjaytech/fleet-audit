@@ -12,7 +12,7 @@ teardown() {
 }
 
 @test "stub collector writes only its expected workspace file" {
-    run "${project_root}/src/fleet_audit/collectors/stub.sh" "${workspace}"
+    run /bin/bash "${project_root}/src/fleet_audit/collectors/stub.sh" "${workspace}"
 
     [ "${status}" -eq 0 ]
     [ "${output}" = "" ]
@@ -26,7 +26,7 @@ teardown() {
     mkdir -- "${real_workspace}"
     ln -s -- "${real_workspace}" "${symlink_workspace}"
 
-    run "${project_root}/src/fleet_audit/collectors/stub.sh" "${symlink_workspace}"
+    run /bin/bash "${project_root}/src/fleet_audit/collectors/stub.sh" "${symlink_workspace}"
 
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"Collector workspace is not a private directory."* ]]
