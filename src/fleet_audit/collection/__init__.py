@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -8,6 +9,7 @@ from time import monotonic
 from typing import Any
 
 from fleet_audit import __version__
+from fleet_audit.collection.hardware_parser import HardwareParseError, parse_hardware
 from fleet_audit.collection.os_parser import PlatformParseError, parse_platform
 from fleet_audit.collection.runner import CollectorResult, CollectorStatus, run_collector
 from fleet_audit.collection.workspace import secure_workspace
@@ -18,87 +20,133 @@ class CollectionError(RuntimeError):
     """Raised when a snapshot cannot be collected safely."""
 
 
+_COLLECTOR_RESOURCES = {
+    "platform": "os.sh",
+    "hardware": "hardware.sh",
+}
+
+
 def collect_snapshot(
     *,
     label: str = "host",
-    collector_path: Path | None = None,
+    collector_paths: Mapping[str, Path] | None = None,
     timeout_seconds: float = 5,
     workspace_parent: Path | None = None,
 ) -> dict[str, Any]:
     started_at = monotonic()
+    selected_collectors = (
+        tuple(_COLLECTOR_RESOURCES) if collector_paths is None else tuple(collector_paths)
+    )
+    unknown_collectors = set(selected_collectors) - set(_COLLECTOR_RESOURCES)
+    if unknown_collectors:
+        names = ", ".join(sorted(unknown_collectors))
+        raise CollectionError(f"unknown collector: {names}")
+
+    domains: dict[str, dict[str, Any]] = {
+        "platform": {"status": "unavailable"},
+        "hardware": {"status": "unavailable"},
+    }
+    outcomes: list[tuple[CollectorResult, str | None]] = []
 
     with secure_workspace(parent=workspace_parent) as workspace:
-        result = _run_platform_collector(collector_path, workspace, timeout_seconds)
-        platform: dict[str, Any] = {"status": "unavailable"}
-        warning_code: str | None = None
-        if result.status is CollectorStatus.AVAILABLE:
-            try:
-                platform = parse_platform(workspace)
-            except PlatformParseError as error:
-                result = CollectorResult(
-                    name="platform",
-                    status=CollectorStatus.ERROR,
-                    exit_code=result.exit_code,
-                    detail=f"Collector output was invalid: {error}.",
+        for name in selected_collectors:
+            override_path = None if collector_paths is None else collector_paths[name]
+            result = _run_named_collector(
+                name,
+                override_path,
+                workspace,
+                timeout_seconds,
+            )
+            warning_code: str | None = None
+            if result.status is CollectorStatus.AVAILABLE:
+                domain, result, warning_code = _parse_collector_output(
+                    name,
+                    result,
+                    workspace,
                 )
-                warning_code = "COLLECTOR_OUTPUT_INVALID"
+                domains[name] = domain
+            outcomes.append((result, warning_code))
 
-    snapshot = _snapshot(label, platform, result, started_at, warning_code)
+    snapshot = _snapshot(label, domains, outcomes, started_at)
     validate_snapshot(snapshot)
     return snapshot
 
 
-def _run_platform_collector(
+def _run_named_collector(
+    name: str,
     collector_path: Path | None,
     workspace: Path,
     timeout_seconds: float,
 ) -> CollectorResult:
     if collector_path is not None:
-        return run_collector("platform", collector_path, workspace, timeout_seconds=timeout_seconds)
+        return run_collector(name, collector_path, workspace, timeout_seconds=timeout_seconds)
 
-    collector_resource = files("fleet_audit.collectors").joinpath("os.sh")
+    collector_resource = files("fleet_audit.collectors").joinpath(_COLLECTOR_RESOURCES[name])
     with as_file(collector_resource) as packaged_collector:
         return run_collector(
-            "platform",
+            name,
             packaged_collector,
             workspace,
             timeout_seconds=timeout_seconds,
         )
 
 
+def _parse_collector_output(
+    name: str,
+    result: CollectorResult,
+    workspace: Path,
+) -> tuple[dict[str, Any], CollectorResult, str | None]:
+    try:
+        domain = parse_platform(workspace) if name == "platform" else parse_hardware(workspace)
+    except (PlatformParseError, HardwareParseError) as error:
+        return (
+            {"status": "unavailable"},
+            CollectorResult(
+                name=name,
+                status=CollectorStatus.ERROR,
+                exit_code=result.exit_code,
+                detail=f"Collector output was invalid: {error}.",
+            ),
+            "COLLECTOR_OUTPUT_INVALID",
+        )
+    return domain, result, None
+
+
 def _snapshot(
     label: str,
-    platform: dict[str, Any],
-    result: CollectorResult,
+    domains: dict[str, dict[str, Any]],
+    outcomes: list[tuple[CollectorResult, str | None]],
     started_at: float,
-    warning_code: str | None,
 ) -> dict[str, Any]:
-    capability = {"name": result.name, "status": result.status.value}
-    if result.detail is not None:
-        capability["detail"] = result.detail
-
+    capabilities: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
-    if result.status is not CollectorStatus.AVAILABLE:
-        warnings.append(
-            {
-                "collector": result.name,
-                "code": warning_code
-                or (
-                    "CAPABILITY_UNAVAILABLE"
-                    if result.status is CollectorStatus.UNAVAILABLE
-                    else "COLLECTOR_ERROR"
-                ),
-                "message": result.detail or "Collector did not complete.",
-            }
-        )
+    for result, warning_code in outcomes:
+        capability = {"name": result.name, "status": result.status.value}
+        if result.detail is not None:
+            capability["detail"] = result.detail
+        capabilities.append(capability)
+
+        if result.status is not CollectorStatus.AVAILABLE:
+            warnings.append(
+                {
+                    "collector": result.name,
+                    "code": warning_code
+                    or (
+                        "CAPABILITY_UNAVAILABLE"
+                        if result.status is CollectorStatus.UNAVAILABLE
+                        else "COLLECTOR_ERROR"
+                    ),
+                    "message": result.detail or "Collector did not complete.",
+                }
+            )
 
     return {
         "schema_version": "1.0",
         "tool": {"name": "fleet-audit", "version": __version__},
         "collected_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "host": {"label": label},
-        "platform": platform,
-        "hardware": {"status": "unavailable"},
+        "platform": domains["platform"],
+        "hardware": domains["hardware"],
         "storage": {"status": "unavailable", "devices": [], "filesystems": []},
         "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},
         "software": {
@@ -114,7 +162,7 @@ def _snapshot(
             "status": "partial",
             "privilege_level": "root" if os.geteuid() == 0 else "non-root",
             "duration_ms": max(0, int((monotonic() - started_at) * 1000)),
-            "capabilities": [capability],
+            "capabilities": capabilities,
             "warnings": warnings,
         },
     }

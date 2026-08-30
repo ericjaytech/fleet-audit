@@ -31,8 +31,8 @@ def run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def write_collector(directory: Path, body: str) -> Path:
-    collector = directory / "collector.sh"
+def write_collector(directory: Path, body: str, filename: str = "collector.sh") -> Path:
+    collector = directory / filename
     collector.write_text("#!/usr/bin/env bash\nset -u\n" + body, encoding="utf-8")
     return collector
 
@@ -117,7 +117,7 @@ def test_timeout_snapshot_preserves_error_and_removes_workspace(tmp_path: Path) 
 
     snapshot = collect_snapshot(
         label="test-host",
-        collector_path=collector,
+        collector_paths={"platform": collector},
         timeout_seconds=0.01,
         workspace_parent=tmp_path,
     )
@@ -143,7 +143,7 @@ def test_parser_failure_removes_collection_workspace(tmp_path: Path) -> None:
 
     snapshot = collect_snapshot(
         label="test-host",
-        collector_path=collector,
+        collector_paths={"platform": collector},
         workspace_parent=tmp_path,
     )
 
@@ -157,6 +157,51 @@ def test_parser_failure_removes_collection_workspace(tmp_path: Path) -> None:
     ]
     assert snapshot["collection"]["warnings"][0]["code"] == "COLLECTOR_OUTPUT_INVALID"
     assert list(tmp_path.glob("fleet-audit-*")) == []
+
+
+def test_hardware_parser_failure_preserves_successful_platform_data(tmp_path: Path) -> None:
+    platform_collector = write_collector(
+        tmp_path,
+        'printf \'ID=test\\nVERSION_ID="1"\\nPRETTY_NAME="Test Linux"\\n\' > "${1}/os-release"\n'
+        'printf "6.8.0\\n" > "${1}/kernel"\n'
+        'printf "x86_64\\n" > "${1}/architecture"\n'
+        'printf "1.0 2.0\\n" > "${1}/uptime"\n',
+        "platform.sh",
+    )
+    hardware_collector = write_collector(
+        tmp_path,
+        'printf "processor : 0\\nmodel name : Test CPU\\n" > "${1}/cpuinfo"\n'
+        'printf "MemTotal: invalid\\n" > "${1}/meminfo"\n'
+        'printf "1\\n" > "${1}/logical-processors"\n',
+        "hardware.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={
+            "platform": platform_collector,
+            "hardware": hardware_collector,
+        },
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["platform"]["status"] == "complete"
+    assert snapshot["hardware"] == {"status": "unavailable"}
+    assert snapshot["collection"]["capabilities"] == [
+        {"name": "platform", "status": "available"},
+        {
+            "name": "hardware",
+            "status": "error",
+            "detail": "Collector output was invalid: invalid MemTotal value; expected kB.",
+        },
+    ]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "hardware",
+            "code": "COLLECTOR_OUTPUT_INVALID",
+            "message": "Collector output was invalid: invalid MemTotal value; expected kB.",
+        }
+    ]
 
 
 def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> None:
@@ -177,7 +222,13 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     assert snapshot["platform"]["kernel"]
     assert snapshot["platform"]["architecture"]
     assert snapshot["platform"]["uptime_seconds"] >= 0
-    assert snapshot["collection"]["capabilities"] == [{"name": "platform", "status": "available"}]
+    assert snapshot["hardware"]["status"] in {"complete", "partial"}
+    assert snapshot["hardware"]["cpu"]["logical_processors"] >= 1
+    assert snapshot["hardware"]["memory_bytes"] > 0
+    assert snapshot["collection"]["capabilities"] == [
+        {"name": "platform", "status": "available"},
+        {"name": "hardware", "status": "available"},
+    ]
 
 
 def test_collect_command_does_not_overwrite_existing_file(tmp_path: Path) -> None:
