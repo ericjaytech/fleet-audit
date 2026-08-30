@@ -55,7 +55,15 @@ def test_missing_platform_inputs_are_reported_without_guesses(
         parse_platform(FIXTURES / fixture_name)
 
 
-def test_invalid_uptime_is_reported(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "uptime",
+    [
+        "not-a-number 10.0\n",
+        "10.0 not-a-number\n",
+        "1e3 10.0\n",
+    ],
+)
+def test_invalid_uptime_is_reported(tmp_path: Path, uptime: str) -> None:
     for name in ("os-release", "kernel", "architecture"):
         source = FIXTURES / "malformed-os" / name
         (tmp_path / name).write_bytes(source.read_bytes())
@@ -63,7 +71,7 @@ def test_invalid_uptime_is_reported(tmp_path: Path) -> None:
         'ID=test\nVERSION_ID="1"\nPRETTY_NAME="Test Linux"\n',
         encoding="utf-8",
     )
-    (tmp_path / "uptime").write_text("not-a-number 10.0\n", encoding="utf-8")
+    (tmp_path / "uptime").write_text(uptime, encoding="utf-8")
 
     with pytest.raises(PlatformParseError, match="uptime"):
         parse_platform(tmp_path)

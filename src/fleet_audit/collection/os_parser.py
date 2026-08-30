@@ -9,6 +9,7 @@ from typing import Any
 _MAX_INPUT_BYTES = 65_536
 _OS_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _OS_ID = re.compile(r"^[a-z0-9._-]+$")
+_PROC_SECONDS = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 _REQUIRED_OS_FIELDS = ("ID", "VERSION_ID", "PRETTY_NAME")
 
 
@@ -43,7 +44,8 @@ def _read_required(path: Path) -> str:
     try:
         if path.is_symlink() or not path.is_file():
             raise PlatformParseError(f"required platform input is missing: {path.name}")
-        raw = path.read_bytes()
+        with path.open("rb") as input_file:
+            raw = input_file.read(_MAX_INPUT_BYTES + 1)
     except OSError as error:
         raise PlatformParseError(f"could not read platform input {path.name}") from error
 
@@ -101,7 +103,7 @@ def _parse_single_line(field: str, content: str) -> str:
 
 def _parse_uptime(content: str) -> int:
     fields = content.split()
-    if len(fields) != 2:
+    if len(fields) != 2 or any(_PROC_SECONDS.fullmatch(field) is None for field in fields):
         raise PlatformParseError("invalid uptime value")
 
     try:
