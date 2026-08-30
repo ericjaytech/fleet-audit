@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import resource
 import signal
 import stat
 import subprocess
@@ -47,6 +48,7 @@ def run_collector(
         process = subprocess.Popen(
             ["/bin/bash", str(collector_path), str(workspace)],
             env=environment,
+            preexec_fn=_limit_output_file_size,
             start_new_session=True,
             stderr=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -74,17 +76,17 @@ def run_collector(
         )
 
     _terminate_process_group(process.pid)
+    output_issue = _validate_collector_output(workspace, existing_artifacts)
+    if output_issue is not None:
+        issue_code, detail = output_issue
+        return CollectorResult(
+            name=name,
+            status=CollectorStatus.ERROR,
+            exit_code=exit_code,
+            detail=detail,
+            issue_code=issue_code,
+        )
     if exit_code == 0:
-        output_issue = _validate_collector_output(workspace, existing_artifacts)
-        if output_issue is not None:
-            issue_code, detail = output_issue
-            return CollectorResult(
-                name=name,
-                status=CollectorStatus.ERROR,
-                exit_code=exit_code,
-                detail=detail,
-                issue_code=issue_code,
-            )
         return CollectorResult(name, CollectorStatus.AVAILABLE, exit_code)
     if exit_code == 10:
         return CollectorResult(
@@ -101,6 +103,16 @@ def run_collector(
         f"Collector exited with code {exit_code}.",
         "COLLECTOR_EXIT_ERROR",
     )
+
+
+def _limit_output_file_size() -> None:
+    _, hard_limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    soft_limit = (
+        _MAX_ARTIFACT_BYTES
+        if hard_limit == resource.RLIM_INFINITY
+        else min(_MAX_ARTIFACT_BYTES, hard_limit)
+    )
+    resource.setrlimit(resource.RLIMIT_FSIZE, (soft_limit, hard_limit))
 
 
 def _terminate_process_group(process_id: int) -> None:
@@ -162,10 +174,10 @@ def _validate_collector_output(
                     "COLLECTOR_WORKSPACE_VIOLATION",
                     "Collector output contained a non-regular artifact.",
                 )
-            if metadata.st_size > _MAX_ARTIFACT_BYTES:
+            if metadata.st_size >= _MAX_ARTIFACT_BYTES:
                 return (
                     "COLLECTOR_OUTPUT_LIMIT",
-                    "Collector output exceeded the 4 MiB per-file limit.",
+                    "Collector output reached the 4 MiB per-file limit.",
                 )
             total_bytes += metadata.st_size
         if total_bytes > _MAX_TOTAL_BYTES:

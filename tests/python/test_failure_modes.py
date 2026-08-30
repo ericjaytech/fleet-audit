@@ -50,7 +50,8 @@ def test_oversized_collector_artifact_is_rejected(tmp_path: Path) -> None:
 
     assert result.status is CollectorStatus.ERROR
     assert result.issue_code == "COLLECTOR_OUTPUT_LIMIT"
-    assert result.detail == "Collector output exceeded the 4 MiB per-file limit."
+    assert result.detail == "Collector output reached the 4 MiB per-file limit."
+    assert (workspace / "oversized").stat().st_size <= 4_194_304
 
 
 def test_collector_cannot_replace_an_existing_workspace_artifact(tmp_path: Path) -> None:
@@ -117,6 +118,6 @@ def test_output_limit_appears_in_snapshot_diagnostics(tmp_path: Path) -> None:
         {
             "collector": "platform",
             "code": "COLLECTOR_OUTPUT_LIMIT",
-            "message": "Collector output exceeded the 4 MiB per-file limit.",
+            "message": "Collector output reached the 4 MiB per-file limit.",
         }
     ]
