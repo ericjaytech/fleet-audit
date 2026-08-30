@@ -33,7 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
 
     collect_parser = commands.add_parser("collect", help="Collect a local inventory snapshot.")
-    collect_parser.add_argument("--output", required=True, type=Path, help="Snapshot JSON path.")
+    publication = collect_parser.add_mutually_exclusive_group(required=True)
+    publication.add_argument("--output", type=Path, help="Snapshot JSON path.")
+    publication.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Collect and validate without writing a snapshot.",
+    )
     collect_parser.add_argument(
         "--label",
         default="host",
@@ -104,7 +110,17 @@ def _collect_command(arguments: argparse.Namespace) -> int:
     snapshot = collect_snapshot(label=arguments.label)
     if policy is not None:
         snapshot["checks"] = evaluate_policy(policy, snapshot)
-        validate_snapshot(snapshot)
+    validate_snapshot(snapshot)
+    if arguments.dry_run:
+        capabilities = snapshot["collection"]["capabilities"]
+        available = sum(item["status"] == "available" for item in capabilities)
+        unavailable = len(capabilities) - available
+        warnings = len(snapshot["collection"]["warnings"])
+        print(
+            f"Dry run complete: {available} capabilities available, "
+            f"{unavailable} unavailable, {warnings} warnings. No snapshot was written."
+        )
+        return 0
     _write_json_exclusive(arguments.output, snapshot)
     print(f"Snapshot written to {arguments.output}")
     return 0

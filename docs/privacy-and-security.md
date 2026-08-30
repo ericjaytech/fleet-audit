@@ -45,4 +45,6 @@ Unavailable or inaccessible data is not evidence that a machine is compliant. Fl
 
 ## Safe demonstrations
 
-Committed fixtures are synthetic. Do not build examples from Microsoft, Google, Astreya, client or personal machines. Live testing must use a disposable environment with no employer or personal data.
+Committed fixtures are synthetic. Do not build examples from employer, client or
+personal machines. Live testing must use a disposable environment with no
+employer or personal data.
