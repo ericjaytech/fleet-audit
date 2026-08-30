@@ -17,6 +17,11 @@ from fleet_audit.collection.network_parser import (
 )
 from fleet_audit.collection.os_parser import PlatformParseError, parse_platform
 from fleet_audit.collection.runner import CollectorResult, CollectorStatus, run_collector
+from fleet_audit.collection.software_parser import (
+    SoftwareParseError,
+    SoftwareWarning,
+    parse_software,
+)
 from fleet_audit.collection.storage_parser import (
     StorageParseError,
     StorageWarning,
@@ -35,6 +40,7 @@ _COLLECTOR_RESOURCES = {
     "hardware": "hardware.sh",
     "storage": "storage.sh",
     "network": "network.sh",
+    "software": "software.sh",
 }
 
 
@@ -59,6 +65,14 @@ def collect_snapshot(
         "hardware": {"status": "unavailable"},
         "storage": {"status": "unavailable", "devices": [], "filesystems": []},
         "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},
+        "software": {
+            "status": "unavailable",
+            "package_manager": None,
+            "installed_packages": [],
+            "enabled_services": [],
+            "pending_updates": None,
+            "reboot_required": None,
+        },
     }
     outcomes: list[tuple[CollectorResult, str | None]] = []
     domain_warnings: list[dict[str, str]] = []
@@ -122,7 +136,7 @@ def _parse_collector_output(
     dict[str, Any],
     CollectorResult,
     str | None,
-    tuple[StorageWarning | NetworkWarning, ...],
+    tuple[StorageWarning | NetworkWarning | SoftwareWarning, ...],
 ]:
     try:
         if name == "platform":
@@ -132,6 +146,9 @@ def _parse_collector_output(
         if name == "storage":
             storage_result = parse_storage(workspace)
             return storage_result.storage, result, None, storage_result.warnings
+        if name == "software":
+            software_result = parse_software(workspace)
+            return software_result.software, result, None, software_result.warnings
 
         network_result = parse_network(workspace)
         return network_result.network, result, None, network_result.warnings
@@ -140,6 +157,7 @@ def _parse_collector_output(
         HardwareParseError,
         StorageParseError,
         NetworkParseError,
+        SoftwareParseError,
     ) as error:
         return (
             _unavailable_domain(name),
@@ -159,6 +177,15 @@ def _unavailable_domain(name: str) -> dict[str, Any]:
         return {"status": "unavailable", "devices": [], "filesystems": []}
     if name == "network":
         return {"status": "unavailable", "interfaces": [], "listening_sockets": []}
+    if name == "software":
+        return {
+            "status": "unavailable",
+            "package_manager": None,
+            "installed_packages": [],
+            "enabled_services": [],
+            "pending_updates": None,
+            "reboot_required": None,
+        }
     return {"status": "unavailable"}
 
 
@@ -200,14 +227,7 @@ def _snapshot(
         "hardware": domains["hardware"],
         "storage": domains["storage"],
         "network": domains["network"],
-        "software": {
-            "status": "unavailable",
-            "package_manager": None,
-            "installed_packages": [],
-            "enabled_services": [],
-            "pending_updates": None,
-            "reboot_required": None,
-        },
+        "software": domains["software"],
         "checks": [],
         "collection": {
             "status": "partial",
