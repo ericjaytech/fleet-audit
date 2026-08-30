@@ -465,21 +465,34 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     assert snapshot["network"]["status"] in {"complete", "partial"}
     assert isinstance(snapshot["network"]["interfaces"], list)
     assert isinstance(snapshot["network"]["listening_sockets"], list)
-    assert snapshot["software"]["status"] in {"complete", "partial"}
-    assert snapshot["software"]["package_manager"] in {"dpkg", None}
-    assert isinstance(snapshot["software"]["installed_packages"], list)
-    assert isinstance(snapshot["software"]["enabled_services"], list)
-    assert snapshot["software"]["pending_updates"] is None or isinstance(
-        snapshot["software"]["pending_updates"], int
-    )
-    assert isinstance(snapshot["software"]["reboot_required"], bool)
-    assert snapshot["collection"]["capabilities"] == [
+    assert snapshot["software"]["status"] in {"complete", "partial", "unavailable"}
+    assert snapshot["collection"]["capabilities"][:4] == [
         {"name": "platform", "status": "available"},
         {"name": "hardware", "status": "available"},
         {"name": "storage", "status": "available"},
         {"name": "network", "status": "available"},
-        {"name": "software", "status": "available"},
     ]
+    software_capability = snapshot["collection"]["capabilities"][4]
+    assert software_capability["name"] == "software"
+    if snapshot["software"]["status"] == "unavailable":
+        assert software_capability["status"] == "error"
+        assert snapshot["software"] == {
+            "status": "unavailable",
+            "package_manager": None,
+            "installed_packages": [],
+            "enabled_services": [],
+            "pending_updates": None,
+            "reboot_required": None,
+        }
+    else:
+        assert software_capability == {"name": "software", "status": "available"}
+        assert snapshot["software"]["package_manager"] in {"dpkg", None}
+        assert isinstance(snapshot["software"]["installed_packages"], list)
+        assert isinstance(snapshot["software"]["enabled_services"], list)
+        assert snapshot["software"]["pending_updates"] is None or isinstance(
+            snapshot["software"]["pending_updates"], int
+        )
+        assert isinstance(snapshot["software"]["reboot_required"], bool)
 
 
 def test_collect_command_does_not_overwrite_existing_file(tmp_path: Path) -> None:
