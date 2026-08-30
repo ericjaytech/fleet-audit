@@ -282,6 +282,74 @@ def test_invalid_storage_output_uses_schema_valid_unavailable_domain(
     ]
 
 
+def test_partial_network_preserves_sockets_and_reports_scoped_warning(
+    tmp_path: Path,
+) -> None:
+    network_collector = write_collector(
+        tmp_path,
+        'printf "unavailable\\n" > "${1}/interfaces.error"\n'
+        'printf "tcp\\t22\\texternal\\n" > "${1}/sockets.tsv"\n',
+        "network.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"network": network_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["network"] == {
+        "status": "partial",
+        "interfaces": [],
+        "listening_sockets": [{"protocol": "tcp", "port": 22, "bind_scope": "external"}],
+    }
+    assert snapshot["collection"]["capabilities"] == [{"name": "network", "status": "available"}]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "network",
+            "code": "INTERFACES_UNAVAILABLE",
+            "message": "Network-interface inventory is unavailable on this host.",
+        }
+    ]
+
+
+def test_invalid_network_output_uses_schema_valid_unavailable_domain(
+    tmp_path: Path,
+) -> None:
+    network_collector = write_collector(
+        tmp_path,
+        'printf "eth0\\tinvalid\\n" > "${1}/interfaces.tsv"\n'
+        'printf "tcp\\tinvalid\\texternal\\n" > "${1}/sockets.tsv"\n',
+        "network.sh",
+    )
+
+    snapshot = collect_snapshot(
+        label="test-host",
+        collector_paths={"network": network_collector},
+        workspace_parent=tmp_path,
+    )
+
+    assert snapshot["network"] == {
+        "status": "unavailable",
+        "interfaces": [],
+        "listening_sockets": [],
+    }
+    assert snapshot["collection"]["capabilities"] == [
+        {
+            "name": "network",
+            "status": "error",
+            "detail": ("Collector output was invalid: no valid network inventory source remains."),
+        }
+    ]
+    assert snapshot["collection"]["warnings"] == [
+        {
+            "collector": "network",
+            "code": "COLLECTOR_OUTPUT_INVALID",
+            "message": ("Collector output was invalid: no valid network inventory source remains."),
+        }
+    ]
+
+
 def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> None:
     output = tmp_path / "snapshot.json"
 
@@ -306,10 +374,14 @@ def test_collect_command_writes_valid_owner_only_snapshot(tmp_path: Path) -> Non
     assert snapshot["storage"]["status"] in {"complete", "partial"}
     assert isinstance(snapshot["storage"]["devices"], list)
     assert isinstance(snapshot["storage"]["filesystems"], list)
+    assert snapshot["network"]["status"] in {"complete", "partial"}
+    assert isinstance(snapshot["network"]["interfaces"], list)
+    assert isinstance(snapshot["network"]["listening_sockets"], list)
     assert snapshot["collection"]["capabilities"] == [
         {"name": "platform", "status": "available"},
         {"name": "hardware", "status": "available"},
         {"name": "storage", "status": "available"},
+        {"name": "network", "status": "available"},
     ]
 
 

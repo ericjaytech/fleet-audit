@@ -10,6 +10,11 @@ from typing import Any
 
 from fleet_audit import __version__
 from fleet_audit.collection.hardware_parser import HardwareParseError, parse_hardware
+from fleet_audit.collection.network_parser import (
+    NetworkParseError,
+    NetworkWarning,
+    parse_network,
+)
 from fleet_audit.collection.os_parser import PlatformParseError, parse_platform
 from fleet_audit.collection.runner import CollectorResult, CollectorStatus, run_collector
 from fleet_audit.collection.storage_parser import (
@@ -29,6 +34,7 @@ _COLLECTOR_RESOURCES = {
     "platform": "os.sh",
     "hardware": "hardware.sh",
     "storage": "storage.sh",
+    "network": "network.sh",
 }
 
 
@@ -52,6 +58,7 @@ def collect_snapshot(
         "platform": {"status": "unavailable"},
         "hardware": {"status": "unavailable"},
         "storage": {"status": "unavailable", "devices": [], "filesystems": []},
+        "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},
     }
     outcomes: list[tuple[CollectorResult, str | None]] = []
     domain_warnings: list[dict[str, str]] = []
@@ -115,17 +122,25 @@ def _parse_collector_output(
     dict[str, Any],
     CollectorResult,
     str | None,
-    tuple[StorageWarning, ...],
+    tuple[StorageWarning | NetworkWarning, ...],
 ]:
     try:
         if name == "platform":
             return parse_platform(workspace), result, None, ()
         if name == "hardware":
             return parse_hardware(workspace), result, None, ()
+        if name == "storage":
+            storage_result = parse_storage(workspace)
+            return storage_result.storage, result, None, storage_result.warnings
 
-        storage_result = parse_storage(workspace)
-        return storage_result.storage, result, None, storage_result.warnings
-    except (PlatformParseError, HardwareParseError, StorageParseError) as error:
+        network_result = parse_network(workspace)
+        return network_result.network, result, None, network_result.warnings
+    except (
+        PlatformParseError,
+        HardwareParseError,
+        StorageParseError,
+        NetworkParseError,
+    ) as error:
         return (
             _unavailable_domain(name),
             CollectorResult(
@@ -142,6 +157,8 @@ def _parse_collector_output(
 def _unavailable_domain(name: str) -> dict[str, Any]:
     if name == "storage":
         return {"status": "unavailable", "devices": [], "filesystems": []}
+    if name == "network":
+        return {"status": "unavailable", "interfaces": [], "listening_sockets": []}
     return {"status": "unavailable"}
 
 
@@ -182,7 +199,7 @@ def _snapshot(
         "platform": domains["platform"],
         "hardware": domains["hardware"],
         "storage": domains["storage"],
-        "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},
+        "network": domains["network"],
         "software": {
             "status": "unavailable",
             "package_manager": None,
