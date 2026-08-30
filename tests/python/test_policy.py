@@ -20,6 +20,7 @@ from fleet_audit.policy import (
 from fleet_audit.validation import validate_snapshot
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
+PROJECT_ROOT = Path(__file__).parents[2]
 
 
 def write_policy(tmp_path: Path, content: str) -> Path:
@@ -31,6 +32,18 @@ def write_policy(tmp_path: Path, content: str) -> Path:
 def complete_snapshot() -> dict[str, Any]:
     fixture = FIXTURES / "snapshots" / "complete.json"
     return json.loads(fixture.read_text(encoding="utf-8"))
+
+
+def test_example_policy_covers_all_supported_check_types() -> None:
+    policy = load_policy(PROJECT_ROOT / "config" / "example-policy.toml")
+
+    assert {type(check) for check in policy.checks} == {
+        FilesystemUsageCheck,
+        PendingUpdatesCheck,
+        MaximumUptimeCheck,
+        RequiredServiceCheck,
+        ProhibitedPortCheck,
+    }
 
 
 def test_load_policy_parses_all_supported_check_types(tmp_path: Path) -> None:

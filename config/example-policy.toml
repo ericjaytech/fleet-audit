@@ -1,0 +1,30 @@
+version = 1
+
+[[checks]]
+id = "disk.root.utilisation"
+type = "filesystem_usage"
+mountpoint = "/"
+warn_percent = 80
+fail_percent = 90
+
+[[checks]]
+id = "updates.pending"
+type = "pending_updates"
+warn_count = 1
+fail_count = 20
+
+[[checks]]
+id = "uptime.maximum"
+type = "maximum_uptime"
+max_days = 30
+
+[[checks]]
+id = "service.ssh.required"
+type = "required_service"
+service = "ssh.service"
+
+[[checks]]
+id = "port.telnet.prohibited"
+type = "prohibited_port"
+protocol = "tcp"
+port = 23
