@@ -10,7 +10,8 @@ from typing import Any
 
 from fleet_audit import __version__
 from fleet_audit.collection import CollectionError, collect_snapshot
-from fleet_audit.validation import SnapshotValidationError, load_snapshot
+from fleet_audit.policy import PolicyError, evaluate_policy, load_policy
+from fleet_audit.validation import SnapshotValidationError, load_snapshot, validate_snapshot
 
 
 class OutputExistsError(ValueError):
@@ -37,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="host",
         help="Non-sensitive label used to distinguish this host (default: host).",
     )
+    collect_parser.add_argument(
+        "--policy",
+        type=Path,
+        help="TOML policy whose checks are attached to the snapshot.",
+    )
     collect_parser.set_defaults(handler=_collect_command)
 
     validate_parser = commands.add_parser("validate", help="Validate a snapshot JSON file.")
@@ -55,7 +61,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
     try:
         return handler(parsed)
-    except (OutputExistsError, SnapshotValidationError) as error:
+    except (OutputExistsError, PolicyError, SnapshotValidationError) as error:
         print(f"fleet-audit: {error}", file=sys.stderr)
         return 2
     except (CollectionError, OSError) as error:
@@ -64,7 +70,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
 
 def _collect_command(arguments: argparse.Namespace) -> int:
+    policy = load_policy(arguments.policy) if arguments.policy is not None else None
     snapshot = collect_snapshot(label=arguments.label)
+    if policy is not None:
+        snapshot["checks"] = evaluate_policy(policy, snapshot)
+        validate_snapshot(snapshot)
     _write_json_exclusive(arguments.output, snapshot)
     print(f"Snapshot written to {arguments.output}")
     return 0
