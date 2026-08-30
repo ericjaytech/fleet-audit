@@ -118,6 +118,19 @@ def test_conflicting_package_versions_are_invalid(tmp_path: Path) -> None:
     assert result.warnings[0].code == "PACKAGES_INVALID"
 
 
+def test_oversized_pending_update_count_is_invalid_not_an_uncaught_error(
+    tmp_path: Path,
+) -> None:
+    _copy_fixture_files(tmp_path, "packages.tsv", "services.txt", "reboot-required.txt")
+    (tmp_path / "pending-updates.txt").write_text("9" * 5_000, encoding="utf-8")
+
+    result = parse_software(tmp_path)
+
+    assert result.software["status"] == "partial"
+    assert result.software["pending_updates"] is None
+    assert "PENDING_UPDATES_INVALID" in [warning.code for warning in result.warnings]
+
+
 def test_no_valid_software_source_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(SoftwareParseError, match="no valid software inventory"):
         parse_software(tmp_path)

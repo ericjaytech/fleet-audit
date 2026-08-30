@@ -7,6 +7,7 @@ from typing import Any, TypeVar
 
 _MAX_INPUT_BYTES = 4_194_304
 _MAX_LINES = 100_000
+_MAX_INTEGER_DIGITS = 20
 
 
 class SoftwareParseError(ValueError):
@@ -199,7 +200,12 @@ def _parse_services(lines: list[str]) -> list[str]:
 
 
 def _parse_pending_updates(lines: list[str]) -> int:
-    if len(lines) != 1 or not lines[0].isascii() or not lines[0].isdecimal():
+    if (
+        len(lines) != 1
+        or len(lines[0]) > _MAX_INTEGER_DIGITS
+        or not lines[0].isascii()
+        or not lines[0].isdecimal()
+    ):
         raise SoftwareParseError("invalid pending-update count")
     return int(lines[0])
 
