@@ -12,6 +12,11 @@ from fleet_audit import __version__
 from fleet_audit.collection.hardware_parser import HardwareParseError, parse_hardware
 from fleet_audit.collection.os_parser import PlatformParseError, parse_platform
 from fleet_audit.collection.runner import CollectorResult, CollectorStatus, run_collector
+from fleet_audit.collection.storage_parser import (
+    StorageParseError,
+    StorageWarning,
+    parse_storage,
+)
 from fleet_audit.collection.workspace import secure_workspace
 from fleet_audit.validation import validate_snapshot
 
@@ -23,6 +28,7 @@ class CollectionError(RuntimeError):
 _COLLECTOR_RESOURCES = {
     "platform": "os.sh",
     "hardware": "hardware.sh",
+    "storage": "storage.sh",
 }
 
 
@@ -45,8 +51,10 @@ def collect_snapshot(
     domains: dict[str, dict[str, Any]] = {
         "platform": {"status": "unavailable"},
         "hardware": {"status": "unavailable"},
+        "storage": {"status": "unavailable", "devices": [], "filesystems": []},
     }
     outcomes: list[tuple[CollectorResult, str | None]] = []
+    domain_warnings: list[dict[str, str]] = []
 
     with secure_workspace(parent=workspace_parent) as workspace:
         for name in selected_collectors:
@@ -59,15 +67,23 @@ def collect_snapshot(
             )
             warning_code: str | None = None
             if result.status is CollectorStatus.AVAILABLE:
-                domain, result, warning_code = _parse_collector_output(
+                domain, result, warning_code, parser_warnings = _parse_collector_output(
                     name,
                     result,
                     workspace,
                 )
                 domains[name] = domain
+                domain_warnings.extend(
+                    {
+                        "collector": name,
+                        "code": warning.code,
+                        "message": warning.message,
+                    }
+                    for warning in parser_warnings
+                )
             outcomes.append((result, warning_code))
 
-    snapshot = _snapshot(label, domains, outcomes, started_at)
+    snapshot = _snapshot(label, domains, outcomes, domain_warnings, started_at)
     validate_snapshot(snapshot)
     return snapshot
 
@@ -95,12 +111,23 @@ def _parse_collector_output(
     name: str,
     result: CollectorResult,
     workspace: Path,
-) -> tuple[dict[str, Any], CollectorResult, str | None]:
+) -> tuple[
+    dict[str, Any],
+    CollectorResult,
+    str | None,
+    tuple[StorageWarning, ...],
+]:
     try:
-        domain = parse_platform(workspace) if name == "platform" else parse_hardware(workspace)
-    except (PlatformParseError, HardwareParseError) as error:
+        if name == "platform":
+            return parse_platform(workspace), result, None, ()
+        if name == "hardware":
+            return parse_hardware(workspace), result, None, ()
+
+        storage_result = parse_storage(workspace)
+        return storage_result.storage, result, None, storage_result.warnings
+    except (PlatformParseError, HardwareParseError, StorageParseError) as error:
         return (
-            {"status": "unavailable"},
+            _unavailable_domain(name),
             CollectorResult(
                 name=name,
                 status=CollectorStatus.ERROR,
@@ -108,18 +135,25 @@ def _parse_collector_output(
                 detail=f"Collector output was invalid: {error}.",
             ),
             "COLLECTOR_OUTPUT_INVALID",
+            (),
         )
-    return domain, result, None
+
+
+def _unavailable_domain(name: str) -> dict[str, Any]:
+    if name == "storage":
+        return {"status": "unavailable", "devices": [], "filesystems": []}
+    return {"status": "unavailable"}
 
 
 def _snapshot(
     label: str,
     domains: dict[str, dict[str, Any]],
     outcomes: list[tuple[CollectorResult, str | None]],
+    domain_warnings: list[dict[str, str]],
     started_at: float,
 ) -> dict[str, Any]:
     capabilities: list[dict[str, str]] = []
-    warnings: list[dict[str, str]] = []
+    warnings = list(domain_warnings)
     for result, warning_code in outcomes:
         capability = {"name": result.name, "status": result.status.value}
         if result.detail is not None:
@@ -147,7 +181,7 @@ def _snapshot(
         "host": {"label": label},
         "platform": domains["platform"],
         "hardware": domains["hardware"],
-        "storage": {"status": "unavailable", "devices": [], "filesystems": []},
+        "storage": domains["storage"],
         "network": {"status": "unavailable", "interfaces": [], "listening_sockets": []},
         "software": {
             "status": "unavailable",
