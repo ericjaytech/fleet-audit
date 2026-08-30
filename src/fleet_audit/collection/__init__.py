@@ -59,6 +59,8 @@ def collect_snapshot(
     if unknown_collectors:
         names = ", ".join(sorted(unknown_collectors))
         raise CollectionError(f"unknown collector: {names}")
+    if collector_paths is not None:
+        _validate_override_paths(collector_paths)
 
     domains: dict[str, dict[str, Any]] = {
         "platform": {"status": "unavailable"},
@@ -79,19 +81,21 @@ def collect_snapshot(
 
     with secure_workspace(parent=workspace_parent) as workspace:
         for name in selected_collectors:
+            collector_workspace = workspace / name
+            collector_workspace.mkdir(mode=0o700)
             override_path = None if collector_paths is None else collector_paths[name]
             result = _run_named_collector(
                 name,
                 override_path,
-                workspace,
+                collector_workspace,
                 timeout_seconds,
             )
-            warning_code: str | None = None
+            warning_code = result.issue_code
             if result.status is CollectorStatus.AVAILABLE:
                 domain, result, warning_code, parser_warnings = _parse_collector_output(
                     name,
                     result,
-                    workspace,
+                    collector_workspace,
                 )
                 domains[name] = domain
                 domain_warnings.extend(
@@ -107,6 +111,20 @@ def collect_snapshot(
     snapshot = _snapshot(label, domains, outcomes, domain_warnings, started_at)
     validate_snapshot(snapshot)
     return snapshot
+
+
+def _validate_override_paths(collector_paths: Mapping[str, Path]) -> None:
+    for name, collector_path in collector_paths.items():
+        try:
+            valid = (
+                not collector_path.is_symlink()
+                and collector_path.is_file()
+                and os.access(collector_path, os.R_OK)
+            )
+        except OSError:
+            valid = False
+        if not valid:
+            raise CollectionError(f"invalid collector path for {name}: {collector_path}")
 
 
 def _run_named_collector(
@@ -166,6 +184,7 @@ def _parse_collector_output(
                 status=CollectorStatus.ERROR,
                 exit_code=result.exit_code,
                 detail=f"Collector output was invalid: {error}.",
+                issue_code="COLLECTOR_OUTPUT_INVALID",
             ),
             "COLLECTOR_OUTPUT_INVALID",
             (),
