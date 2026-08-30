@@ -62,7 +62,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes bats shellcheck shfmt
 
       - name: Check shell syntax and safety
-        run: shellcheck src/fleet_audit/collectors/*.sh
+        run: shellcheck --external-sources --source-path=src/fleet_audit/collectors src/fleet_audit/collectors/*.sh
 
       - name: Check shell formatting
         run: shfmt --diff --indent 4 src/fleet_audit/collectors/*.sh
