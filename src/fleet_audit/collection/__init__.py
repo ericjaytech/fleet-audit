@@ -28,7 +28,7 @@ from fleet_audit.collection.storage_parser import (
     parse_storage,
 )
 from fleet_audit.collection.workspace import secure_workspace
-from fleet_audit.validation import validate_snapshot
+from fleet_audit.validation import SnapshotValidationError, validate_snapshot
 
 
 class CollectionError(RuntimeError):
@@ -109,7 +109,10 @@ def collect_snapshot(
             outcomes.append((result, warning_code))
 
     snapshot = _snapshot(label, domains, outcomes, domain_warnings, started_at)
-    validate_snapshot(snapshot)
+    try:
+        validate_snapshot(snapshot)
+    except SnapshotValidationError as error:
+        raise CollectionError(f"generated snapshot failed validation: {error}") from error
     return snapshot
 
 

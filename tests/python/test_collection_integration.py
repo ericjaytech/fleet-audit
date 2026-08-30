@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fleet_audit.collection import collect_snapshot
+import pytest
+
+from fleet_audit.collection import CollectionError, collect_snapshot
+from fleet_audit.validation import SnapshotValidationError
 
 
 def write_collector(directory: Path, filename: str, body: str) -> Path:
@@ -103,6 +106,26 @@ def test_no_successful_domain_produces_a_failed_collection(tmp_path: Path) -> No
     assert snapshot["collection"]["status"] == "failed"
     assert all(domain["status"] == "unavailable" for domain in _domains(snapshot))
     assert snapshot["collection"]["warnings"][0]["code"] == "CAPABILITY_UNAVAILABLE"
+
+
+def test_final_validation_failure_prevents_snapshot_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collector = write_collector(tmp_path, "platform.sh", "exit 10\n")
+
+    def reject_snapshot(snapshot: object) -> None:
+        raise SnapshotValidationError("synthetic validation failure")
+
+    monkeypatch.setattr("fleet_audit.collection.validate_snapshot", reject_snapshot)
+
+    with pytest.raises(CollectionError, match="generated snapshot failed validation"):
+        collect_snapshot(
+            collector_paths={"platform": collector},
+            workspace_parent=tmp_path,
+        )
+
+    assert list(tmp_path.glob("fleet-audit-*")) == []
 
 
 def _domains(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
