@@ -1,0 +1,6 @@
+udp	5353	wildcard
+tcp	8080	external
+tcp	443	wildcard
+tcp	631	loopback
+tcp	8080	external
+udp	53	loopback
